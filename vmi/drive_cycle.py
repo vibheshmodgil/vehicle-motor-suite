@@ -14,6 +14,7 @@ from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
 from .physics import calculate_crr_cd_a, df, g
+from .applog import logger
 
 
 
@@ -234,11 +235,11 @@ class DriveCycleMixin:
             param_text = (
                 f"Reference Mass (kg): {m}\n"
                 f"Crr: {cr}\n"
-                f"CdA (mÂ²): {cda}\n"
+                f"CdA (m²): {cda}\n"
                 f"Wheel Radius (m): {radius_m}\n"
                 f"Peak Torque (Nm): {peak_torque}\n"
                 f"Peak Power (kW): {peak_power}\n"
-                f"Air Density (kg/mÂ³): {density}\n"
+                f"Air Density (kg/m³): {density}\n"
                 f"Gradient Angle (deg): {angle}\n"
             )
             label = tk.Label(popup, text="Parameters used for Torque-Speed Calculation:", font=("Segoe UI", 11, "bold"), bg=COLORS['background'])
@@ -373,7 +374,7 @@ class DriveCycleMixin:
                 vehicle_speeds_kmh = (speeds_rpm * 2 * np.pi * wheel_radius) * 3.6 / 60
                 self.ax.plot(speeds_rpm, peak_torque_curve, '--', color='black', label="Peak Torque (Theoretical)")
             except Exception as e:
-                print("Error plotting theoretical peak torque curve:", e)
+                logger.error("Error plotting theoretical peak torque curve: %s", e)
 
         self.ax.set_xlabel("motor Speed (RPM)")
         self.ax.set_ylabel("Net Torque (Nm)")

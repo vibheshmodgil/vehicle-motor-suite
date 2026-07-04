@@ -1,16 +1,20 @@
 # Requirements for Vehicle ↔ Motor Integration Suite
-# Tested with Python 3.14
-customtkinter
-matplotlib
-numpy
-pandas
-scipy
-seaborn
-Pillow
-openpyxl
+# Pinned to the versions the app is developed and tested against.
+# (customtkinter in particular makes breaking changes between versions.)
+customtkinter==5.2.2
+matplotlib==3.10.9
+numpy==1.26.4
+pandas==2.3.3
+scipy==1.15.3
+seaborn==0.13.2
+Pillow==12.2.0
+openpyxl==3.1.5
 
 # Assistant sidebar (local LLM via Ollama + local RAG index)
-requests
-chromadb
-pypdf
-python-docx
+requests==2.34.2
+chromadb==1.5.9
+pypdf==6.14.2
+python-docx==1.2.0
+
+# Development / testing (run: python -m pytest tests/)
+pytest==9.1.1

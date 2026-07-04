@@ -14,6 +14,7 @@ from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
 from .physics import calculate_crr_cd_a, df, g
+from .applog import logger
 
 
 
@@ -222,6 +223,57 @@ class HelpersMixin:
         ).pack(side="left")
         return row
 
+    def update_data_checklist(self, analysis_type=None):
+        """Refresh the 'what data does this analysis need' line under the
+        Analysis Type selector. Shows required/optional uploads with ✔/✖ so a
+        new user immediately sees what's missing. Analyses with no uploads
+        show nothing."""
+        label = getattr(self, "data_checklist_label", None)
+        if label is None:
+            return
+        analysis_type = analysis_type or getattr(self, "plot_mode", "")
+
+        def have(attr):
+            return getattr(self, attr, None) is not None
+
+        # (name, present, required) per analysis; [] = no uploads needed.
+        needs = {
+            "Drive Cycle": [
+                ("Drive cycle", have("dataframe"), True),
+                ("Motor data", have("motor_dataframe"), False),
+            ],
+            "Drive Cycle Efficiency": [
+                ("Drive cycle", have("dataframe"), True),
+                ("Motor map", have("efficiency_data_1"), True),
+                ("Controller map", have("efficiency_data_2"), True),
+            ],
+            "Range analysis": [
+                ("Drive cycle", have("dataframe"), True),
+                ("Motor map", have("efficiency_data_1"), False),
+                ("Controller map", have("efficiency_data_2"), False),
+            ],
+            "Engine analysis": [
+                ("Engine torque-RPM", have("engine_dataframe"), True),
+                ("Gear efficiency", bool(getattr(self, "engine_efficiency_curves", None)), False),
+            ],
+        }.get(analysis_type, [])
+
+        if not needs:
+            label.configure(text="")
+            return
+        parts = []
+        missing_required = False
+        for name, present, required in needs:
+            mark = "✔" if present else "✖"
+            suffix = "" if required else " (optional)"
+            parts.append(f"{mark} {name}{suffix}")
+            if required and not present:
+                missing_required = True
+        label.configure(
+            text="Data:  " + "   ".join(parts),
+            text_color=COLORS["warning"] if missing_required else COLORS["text_muted"],
+        )
+
     def setup_plot_style(self):
         """Apply a clean modern matplotlib look (cosmetic only)."""
         try:
@@ -331,12 +383,10 @@ class HelpersMixin:
 
     def open_file(self):
         """Handles file opening (Placeholder)."""
-        print("Open File Clicked")
 
 
     def save_file(self):
         """Handles file saving (Placeholder)."""
-        print("Save File Clicked")
 
 
     def show_about(self):
@@ -452,6 +502,47 @@ class HelpersMixin:
     def on_mref_change(self, event):
         if not self.crr_manual or not self.cda_manual:
             self.plot_graph()
+
+    @staticmethod
+    def tyre_static_radius_m(spec):
+        """Static (unloaded) tyre radius in metres from a size designation.
+
+        Metric 'W/A-R'  (e.g. 90/90-12):  r = R*25.4/2 + W*(A/100)   [mm]
+            W = section width (mm), A = aspect ratio (%), R = rim (in)
+        Inch  'W.WW-R'  (e.g. 3.00-10):   r = R*25.4/2 + W*25.4      [mm]
+            older bias-ply sizes; aspect ratio ~100% of the inch width.
+        """
+        s = str(spec).strip()
+        body, rim_in = s.rsplit("-", 1)
+        rim_mm = float(rim_in) * 25.4
+        if "/" in body:
+            width_mm, aspect_pct = body.split("/")
+            section_mm = float(width_mm) * float(aspect_pct) / 100.0
+        else:
+            section_mm = float(body) * 25.4
+        return round((rim_mm / 2.0 + section_mm) / 1000.0, 4)
+
+    def on_dynamic_radius_factor_change(self, event=None):
+        """Re-apply the selected tyre's radius when the Dynamic Radius Factor
+        is edited, so the factor takes effect without re-picking the tyre.
+        Skipped when no tyre is selected or the user typed a radius manually."""
+        try:
+            spec = self.tyre_spec_combo.get()
+        except Exception:
+            return
+        if spec not in self.tyre_radius_map or self.wheel_radius_user_modified:
+            return
+        static_radius = self.tyre_radius_map[spec]
+        factor = self.get_dynamic_radius_factor()
+        dynamic_radius = round(static_radius * factor, 4)
+        self.wheel_radius_entry.delete(0, "end")
+        self.wheel_radius_entry.insert(0, str(dynamic_radius))
+        try:
+            self.set_status(
+                f"Tyre {spec}: static r={static_radius:.4f} m "
+                f"x {factor:g} -> dynamic r={dynamic_radius:.4f} m", "ok")
+        except Exception:
+            pass
 
     def get_dynamic_radius_factor(self):
         """Multiplier applied to the static (unloaded) tyre radius to get the

@@ -199,7 +199,11 @@ class TorqueForceMixin:
                     motor_rpm_for_interp = x * 60 / (2 * np.pi * wheel_radius) / 3.6 * gear_ratio
 
                 y = np.interp(motor_rpm_for_interp, df_sorted["motor_speed"], df_sorted["motor_torque"])
-                y_cont = df_motor["motor_continuous_torque"].to_numpy()
+                # Rated/continuous from the UPLOADED curve / ratio -- the Excel
+                # peak curve replaces the theoretical one, so the manual Peak
+                # Torque entry must not drive the continuous curve (it made
+                # "rated" exceed the uploaded peak). The ratio field stays live.
+                y_cont = y / ratio
                 peak_curve_name = "Peak Motor Torque"
                 cont_curve_name = "Continuous Motor Torque"
 
@@ -226,7 +230,9 @@ class TorqueForceMixin:
                     motor_rpm = x * 60 / (2 * np.pi * wheel_radius) / 3.6 * gear_ratio
 
                 y = np.interp(motor_rpm, df_sorted["motor_speed"], df_sorted["motor_torque"]) * wheel_drive_scale
-                y_cont = df_motor["wheel_continuous_torque"].to_numpy()
+                # Same fix as the At-Motor branch: continuous = uploaded peak
+                # curve / ratio (already scaled to the wheel here).
+                y_cont = y / ratio
                 peak_curve_name = "Peak Wheel Torque"
                 cont_curve_name = "Continuous Wheel Torque"
 
@@ -387,8 +393,14 @@ class TorqueForceMixin:
                 peak_power_w / motor_omega,
             )
 
-        rated_torque_motor = peak_torque / ratio
-        continuous_motor_torque_curve = np.minimum(rated_torque_motor, continuous_power_w / motor_omega)
+        if hasattr(self, "motor_dataframe") and self.motor_dataframe is not None:
+            # Uploaded curve: rated/continuous = uploaded peak / ratio (the
+            # manual Peak Torque / Continuous Power entries don't describe
+            # this motor; the ratio field remains the user's control).
+            continuous_motor_torque_curve = peak_motor_torque_curve / ratio
+        else:
+            rated_torque_motor = peak_torque / ratio
+            continuous_motor_torque_curve = np.minimum(rated_torque_motor, continuous_power_w / motor_omega)
 
         peak_wheel_torque_curve = peak_motor_torque_curve * wheel_drive_scale
         continuous_wheel_torque_curve = continuous_motor_torque_curve * wheel_drive_scale

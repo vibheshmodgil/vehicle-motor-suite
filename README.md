@@ -27,6 +27,20 @@ It runs entirely on your own computer. Your data never leaves your machine.
   questions about your results using your own reference documents (fully
   local, no data sent to the cloud)
 
+### Quality-of-life features
+
+- **Your inputs survive restarts** — the app silently saves everything on
+  close (to `vmi_last_session.json`) and restores it on the next launch.
+- **Data checklist** — under the Analysis Type selector, a ✔/✖ line shows
+  which files the selected analysis needs and which are already loaded.
+- **Friendly input errors** — invalid fields get a red border and one
+  status-bar message listing everything wrong, instead of popup after popup.
+- **Tyre picker** — choose a tyre size (e.g. `90/90-12`) and the wheel radius
+  is calculated from the specification automatically, including a dynamic
+  rolling-radius factor you can adjust.
+- **Error log** — unexpected errors are recorded in `vmi_app.log` so problems
+  can be diagnosed after the fact.
+
 ## Screenshots
 
 *(Add a screenshot or two here once you have the app running — drag an image
@@ -113,11 +127,25 @@ main.py                    Entry point — run this to start the app
 requirements.txt            List of packages to install (step 4 above)
 generate_sample_data.py     Creates dummy Excel files to try the app with
 vmi/                        The application's source code
+tests/                      Automated tests that lock the physics formulas (see below)
 sample_data/                Generated sample files (created by step 6, not tracked in git)
 knowledge_base/             Your own reference documents for the Assistant sidebar (see below)
 ```
 
 You don't need to open or understand the code in `vmi/` to use the app.
+
+## Tests (for anyone changing the code)
+
+This is an engineering tool, so the calculation formulas are protected by a
+test suite with "golden values" — known-correct outputs captured from the
+calibrated model. Run it with:
+
+```
+python -m pytest tests/
+```
+
+If a test fails after a code change, a physics formula or calibration value
+changed — which should only ever happen deliberately.
 
 ## The Assistant sidebar (optional, local AI chat)
 

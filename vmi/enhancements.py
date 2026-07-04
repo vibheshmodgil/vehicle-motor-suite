@@ -459,7 +459,9 @@ class EnhancementsMixin:
                 except Exception:
                     pass
 
-    def save_scenario(self):
+    def _collect_scenario_data(self):
+        """Snapshot every scenario widget plus loaded datasets into a dict.
+        Shared by Save Scenario and the session autosave."""
         data = {}
         for name, w, kind in self._scenario_widgets():
             try:
@@ -484,6 +486,10 @@ class EnhancementsMixin:
             datasets[slot["name"]] = blob
         if datasets:
             data["__datasets__"] = datasets
+        return data
+
+    def save_scenario(self):
+        data = self._collect_scenario_data()
 
         path = filedialog.asksaveasfilename(
             title="Save scenario",
@@ -516,6 +522,14 @@ class EnhancementsMixin:
             messagebox.showerror("Load error", str(exc))
             return
 
+        applied, restored = self._apply_scenario_data(data)
+        self.set_status(
+            f"Scenario loaded ({applied} fields, {restored} datasets).", "ok")
+
+    def _apply_scenario_data(self, data):
+        """Apply a scenario dict to the UI (fields + datasets + derived state).
+        Shared by Load Scenario and the session restore. Returns
+        (fields_applied, datasets_restored)."""
         applied = 0
         for name, w, kind in self._scenario_widgets():
             if name not in data:
@@ -577,8 +591,45 @@ class EnhancementsMixin:
         except Exception:
             pass
 
+        return applied, restored
+
+    # ------------------------------------------------------------------ #
+    #  Session autosave / restore                                         #
+    # ------------------------------------------------------------------ #
+    SESSION_FILE = "vmi_last_session.json"
+
+    def autosave_session(self):
+        """Silently snapshot the whole UI state to SESSION_FILE (called on
+        window close, so nothing is lost between runs)."""
+        try:
+            data = self._collect_scenario_data()
+            with open(self.SESSION_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+        except Exception:
+            pass
+
+    def restore_last_session(self):
+        """Restore SESSION_FILE if present. Returns True if something was
+        applied. Defensive per-field, so a stale file can't break startup."""
+        try:
+            with open(self.SESSION_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return False
+        try:
+            applied, restored = self._apply_scenario_data(data)
+        except Exception:
+            return False
         self.set_status(
-            f"Scenario loaded ({applied} fields, {restored} datasets).", "ok")
+            f"Restored last session ({applied} fields, {restored} datasets).", "ok")
+        return True
+
+    def _on_app_close(self):
+        self.autosave_session()
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ #
     #  Loss-breakdown waterfall (Range analysis view)                    #

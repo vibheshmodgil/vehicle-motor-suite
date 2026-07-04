@@ -23,15 +23,24 @@ class DispatchMixin:
         """Updates the plot based on the selected toggle state"""
         self.clear_axes()
 
-        # Retrieve user inputs
+        # Retrieve user inputs. parse_float red-borders every bad field and
+        # collects all messages, so the user sees everything wrong at once in
+        # the status bar instead of one modal per field.
+        from .validation import parse_float
+        errors = []
+        m_ref = parse_float(self.m_ref, "Reference Mass", errors=errors)
+        rear_load_ratio = parse_float(self.rear_load_ratio, "Rear Load Ratio", errors=errors)
+        ambient_temp = parse_float(self.ambient_temp, "Ambient Temperature", errors=errors)
+        ambient_pressure = parse_float(self.ambient_pressure, "Ambient Pressure", errors=errors)
+        crr = parse_float(self.crr, "Crr", allow_blank=True, errors=errors)
+        cd_a = parse_float(self.cd_a, "CdA", allow_blank=True, errors=errors)
+        gear_ratio = parse_float(self.gear_ratio, "Gear ratio", errors=errors)
+        if errors:
+            self.set_status("Fix inputs: " + "; ".join(errors), "error")
+            self.show_placeholder_message("Invalid inputs — fields marked in red")
+            self.canvas.draw()
+            return
         try:
-            m_ref = float(self.m_ref.get())
-            rear_load_ratio = float(self.rear_load_ratio.get())
-            ambient_temp = float(self.ambient_temp.get())
-            ambient_pressure = float(self.ambient_pressure.get())
-            crr = float(self.crr.get()) if self.crr.get().strip() else None
-            cd_a = float(self.cd_a.get()) if self.cd_a.get().strip() else None
-            gear_ratio = float(self.gear_ratio.get())
             params = calculate_crr_cd_a(
                 m_ref,
                 rear_load_ratio,
@@ -41,6 +50,7 @@ class DispatchMixin:
                 cd_a=cd_a if self.cda_manual else None,
             )
         except Exception as exc:
+            # e.g. reference mass outside the lookup table without manual Crr/CdA.
             messagebox.showerror("Input Error", str(exc))
             return
         # --- Set calculated Crr and CdA in entries if not given manually ---
@@ -72,12 +82,23 @@ class DispatchMixin:
 
         # self.params_label.configure(text=f"Rolling Resistance Coefficient (Crr): {params['Crr']}\nAerodynamic Drag Area (CdA): {params['CdA']} mÂ²")
 
-        # Retrieve remaining inputs
-        gradients = [float(g.strip()) for g in self.gradients.get().split(",")]
-        wheel_radius = float(self.wheel_radius.get())
-        peak_torque = float(self.peak_torque.get())
-        peak_power = float(self.peak_power.get())
-        continuous_power = float(self.continuous_power.get())
+        # Retrieve remaining inputs (same collect-all-errors treatment).
+        try:
+            gradients = [float(g.strip()) for g in self.gradients.get().split(",") if g.strip()]
+            if not gradients:
+                raise ValueError
+        except Exception:
+            errors.append("Gradients must be comma-separated numbers (e.g. 0,7,12).")
+            gradients = [0.0]
+        wheel_radius = parse_float(self.wheel_radius, "Wheel Radius", minimum=1e-6, errors=errors)
+        peak_torque = parse_float(self.peak_torque, "Peak Torque", minimum=1e-9, errors=errors)
+        peak_power = parse_float(self.peak_power, "Peak Power", minimum=1e-9, errors=errors)
+        continuous_power = parse_float(self.continuous_power, "Continuous Power", errors=errors)
+        if errors:
+            self.set_status("Fix inputs: " + "; ".join(errors), "error")
+            self.show_placeholder_message("Invalid inputs — fields marked in red")
+            self.canvas.draw()
+            return
         try:
             peak_to_rated_torque_ratio = float(self.peak_to_rated_torque_ratio.get())
             if peak_to_rated_torque_ratio <= 0:
@@ -128,11 +149,11 @@ class DispatchMixin:
                 self.xlim_rpm_motor.insert(0, ",".join(f"{v:.2f}" for v in x_limits_motor))
 
         # Now call get_x_limits as usual
-        x_limits = self.get_x_limits(speed_unit, wheel_radius, gear_ratio) 
+        x_limits = self.get_x_limits(speed_unit, wheel_radius, gear_ratio)
         # x_limits = self.get_x_limits(speed_unit, wheel_radius, gear_ratio)
         if x_limits is None:
-            # fallback: use data min/max
-            x_limits = [min(x), max(x)]
+            # Fallback when the limit fields can't be parsed: default km/h span.
+            x_limits = [0.0, 80.0]
         # y_limits = [float(y.strip()) for y in self.ylim.get().split(",")]
 
         plot_part = self.plot_part_combo.get()
@@ -145,7 +166,8 @@ class DispatchMixin:
             self.ylim.insert(0, f"0,{peak_torque + 5}")
         y_limits = self.get_y_limits(plot_part, gear_ratio)
         if y_limits is None:
-           y_limits = [min(y), max(y)]
+            # Fallback when the limit fields can't be parsed: 0..peak+margin Nm.
+            y_limits = [0.0, float(peak_torque) + 5.0]
         x_lim_force=self.get_x_limits_force()
         y_lim_force = self.get_y_limits_force(peak_torque, wheel_radius, gear_ratio)
         # Generate speed range
@@ -272,11 +294,15 @@ class DispatchMixin:
                     self.update_button.pack_forget()
                     self.params_label.pack_forget()
                 
-            self.update_button.pack_forget()
+            # Keep the Crr/CdA info label at the bottom of the section list.
+            # (The in-scroll Update button is gone; the pinned top button is
+            # the single Update action.)
             self.params_label.pack_forget()
-                
-            self.update_button.pack(pady=10)
             self.params_label.pack(pady=10, anchor="w")
+
+        # Refresh the required/optional data checklist for this analysis.
+        if hasattr(self, "update_data_checklist"):
+            self.update_data_checklist(analysis_type)
 
         # Fill the Graph Settings panel with the controls for this analysis.
         # For Powertrain Sizing this resolves to the Torque or Force namespace
@@ -297,11 +323,12 @@ class DispatchMixin:
         if hasattr(self, "_sync_plot_part_lock"):
             self._sync_plot_part_lock()
         self.show_sections_for_analysis(self.plot_mode)  # Show/hide sections
-        # self.plot_graph()
-        analysis_type = self.plot_type.get()
-        if analysis_type == "Compare Standard Motor Data":
+        # Route through _safe_plot (busy cursor, red-bordered bad fields, errors
+        # surfaced in the status bar) instead of calling the plot directly. It
+        # dispatches to update_compare_std_plot / plot_graph itself.
+        if hasattr(self, "_safe_plot"):
+            self._safe_plot()
+        elif self.plot_type.get() == "Compare Standard Motor Data":
             self.update_compare_std_plot()
-            
         else:
             self.plot_graph()
-        # self.update_compare_std_plot()

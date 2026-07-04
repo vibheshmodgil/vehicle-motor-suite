@@ -101,7 +101,18 @@ class TorqueSpeedApp(
             canvas.itemconfig(window_id, width=event.width)
             canvas.configure(scrollregion=canvas.bbox("all"))
         def on_mouse_wheel(event):
-            canvas.yview_scroll(-1 * (event.delta // 120), "units")
+            # Only scroll the input panel when the pointer is actually over it;
+            # otherwise the wheel hijacks scrolling over the plot / assistant.
+            try:
+                widget = self.winfo_containing(event.x_root, event.y_root)
+                w = widget
+                while w is not None:
+                    if w is canvas:
+                        canvas.yview_scroll(-1 * (event.delta // 120), "units")
+                        break
+                    w = w.master
+            except Exception:
+                pass
         canvas.bind("<Configure>", on_canvas_configure)
         input_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.bind_all("<MouseWheel>", on_mouse_wheel)
@@ -134,7 +145,15 @@ class TorqueSpeedApp(
         )
         self.plot_type.set("Powertrain Sizing")
         self.plot_type.pack(side="left", padx=8, pady=4)
-        
+
+        # Required/optional data checklist for the selected analysis (filled by
+        # update_data_checklist; empty for analyses with no uploads).
+        self.data_checklist_label = ctk.CTkLabel(
+            input_frame, text="", font=("Segoe UI", 11),
+            text_color=COLORS['text_muted'], anchor="w", justify="left",
+        )
+        self.data_checklist_label.pack(fill="x", padx=16, pady=(0, 4))
+
 
         # --- Store references to each section ---
         self.sections = {}
@@ -227,7 +246,7 @@ class TorqueSpeedApp(
 
         self.sections['dynamics'] = self.create_section(input_frame, "Vehicle Dynamics Inputs (Optional)", "#f1f5f9")
         self.create_labeled_entry(self.sections['dynamics'], "Crr (optional)", "", "crr")
-        self.create_labeled_entry(self.sections['dynamics'], "CdA (mÂ²) (optional)", "", "cd_a")
+        self.create_labeled_entry(self.sections['dynamics'], "CdA (m²) (optional)", "", "cd_a")
         self.create_labeled_entry(self.sections['dynamics'], "Gradients (%) (comma separated)", "0,7,12.3,17.6", "gradients")
 
         self.sections['motor'] = self.create_section(input_frame, "Motor Performance Parameters", "#f1f5f9")
@@ -243,10 +262,10 @@ class TorqueSpeedApp(
         self.xlim_rpm_vehicle_frame=self.create_labeled_entry(self.sections['sim'], "X-axis Limit (RPM,vehicle)"," ", "xlim_rpm_vehicle",return_frame=True)
         self.xlim_rpm_vehicle_manual = False
         self.xlim_rpm_vehicle.bind("<KeyRelease>", self.on_xlim_rpm_vehicle_manual_edit)
-        self.xlim_rpm_motor_frame=self.create_labeled_entry(self.sections['sim'], "x-axis Limit (RPM,motor)"," ", "xlim_rpm_motor",return_frame=True)
+        self.xlim_rpm_motor_frame=self.create_labeled_entry(self.sections['sim'], "X-axis Limit (RPM,motor)"," ", "xlim_rpm_motor",return_frame=True)
         self.xlim_rpm_motor_manual = False
         self.xlim_rpm_motor.bind("<KeyRelease>", self.on_xlim_rpm_motor_manual_edit)
-        self.ylim_frame=self.create_labeled_entry(self.sections['sim'], "Y-axis Limit (Nm)motor"," ","ylim",return_frame=True)
+        self.ylim_frame=self.create_labeled_entry(self.sections['sim'], "Y-axis Limit (Nm) motor"," ","ylim",return_frame=True)
         self.ylim_manual = False
         self.ylim.bind("<KeyRelease>", self.on_ylim_manual_edit)
         self.ylim_wheel_frame=self.create_labeled_entry(self.sections['sim'], "Y-axis Limit (Nm) wheel", " ", "ylim_wheel",return_frame=True)
@@ -262,7 +281,7 @@ class TorqueSpeedApp(
         self.create_labeled_entry(self.sections['simforce'], "X-axis Limit (kmh)","0,80 ", "xlim_force")
         self.xlim_force_manual = False
         self.xlim_force.bind("<KeyRelease>", self.on_xlim_force_manual_edit)
-        self.create_labeled_entry(self.sections['simforce'], "y-axis Limit (N)"," ", "ylim_force")
+        self.create_labeled_entry(self.sections['simforce'], "Y-axis Limit (N)"," ", "ylim_force")
         self.ylim_force_manual = False
         self.ylim_force.bind("<KeyRelease>", self.on_ylim_force_manual_edit)
 
@@ -302,101 +321,9 @@ class TorqueSpeedApp(
         self.create_labeled_entry(parametric_frame, "Max Gradient Search (%)", "45", "param_grad_max")
         self.create_labeled_entry(parametric_frame, "Gradient Step (%)", "0.25", "param_grad_step")
 
-        # --- Engine Analysis Section ---
-        self.sections['engine_analysis'] = self.create_section(input_frame, "Engine Analysis", "#f1f5f9")
-        engine_frame = self.sections['engine_analysis']
+        # --- Engine Analysis Section (built in its own method) ---
+        self._build_engine_analysis_section(input_frame)
 
-        self.engine_data_row = ctk.CTkFrame(engine_frame, fg_color="transparent")
-        self.engine_data_row.pack(fill="x", pady=(8, 2), padx=8)
-        self.engine_data_upload_button = ctk.CTkButton(
-            self.engine_data_row,
-            text="Upload Engine Torque-RPM Excel",
-            command=self.load_engine_data_excel
-        )
-        self.engine_data_upload_button.pack(side="left", padx=(0, 6), fill='x', expand=True)
-        self.engine_data_indicator = ctk.CTkLabel(
-            self.engine_data_row,
-            text="\u274C",
-            text_color=COLORS['warning'],
-            font=("Segoe UI", 18)
-        )
-        self.engine_data_indicator.pack(side="left", padx=(0, 6))
-        self.engine_data_delete_button = ctk.CTkButton(
-            self.engine_data_row,
-            text="Delete",
-            fg_color=COLORS['warning'],
-            text_color="white",
-            command=self.delete_engine_data,
-            width=60
-        )
-        self.engine_data_delete_button.pack(side="left")
-        self.engine_data_delete_button.configure(state="disabled")
-
-        self.engine_eff_row = ctk.CTkFrame(engine_frame, fg_color="transparent")
-        self.engine_eff_row.pack(fill="x", pady=(2, 8), padx=8)
-        self.engine_eff_upload_button = ctk.CTkButton(
-            self.engine_eff_row,
-            text="Upload Gear Efficiency Excel (Sheets: G1..G6)",
-            command=self.load_engine_efficiency_excel
-        )
-        self.engine_eff_upload_button.pack(side="left", padx=(0, 6), fill='x', expand=True)
-        self.engine_eff_indicator = ctk.CTkLabel(
-            self.engine_eff_row,
-            text="\u274C",
-            text_color=COLORS['warning'],
-            font=("Segoe UI", 18)
-        )
-        self.engine_eff_indicator.pack(side="left", padx=(0, 6))
-        self.engine_eff_delete_button = ctk.CTkButton(
-            self.engine_eff_row,
-            text="Delete",
-            fg_color=COLORS['warning'],
-            text_color="white",
-            command=self.delete_engine_efficiency_data,
-            width=60
-        )
-        self.engine_eff_delete_button.pack(side="left")
-        self.engine_eff_delete_button.configure(state="disabled")
-
-        engine_mode_row = ctk.CTkFrame(engine_frame, fg_color="transparent")
-        engine_mode_row.pack(fill="x", pady=(0, 6), padx=8)
-        ctk.CTkLabel(
-            engine_mode_row,
-            text="Plot Output:",
-            font=("Segoe UI", 12),
-            text_color=COLORS['primary']
-        ).pack(side="left", padx=(0, 8))
-        self.engine_output_combo = ctk.CTkComboBox(
-            engine_mode_row,
-            values=["Wheel Torque (Nm)", "Wheel Force (N)"],
-            font=("Segoe UI", 12),
-            width=180,
-            command=lambda _choice: self.plot_graph(),
-        )
-        self.engine_output_combo.set("Wheel Torque (Nm)")
-        self.engine_output_combo.pack(side="left")
-
-        self.create_labeled_entry(engine_frame, "Gear 1 Ratio", "31.15", "engine_gear_ratio_1")
-        self.create_labeled_entry(engine_frame, "Gear 2 Ratio", "19.83", "engine_gear_ratio_2")
-        self.create_labeled_entry(engine_frame, "Gear 3 Ratio", "14.24", "engine_gear_ratio_3")
-        self.create_labeled_entry(engine_frame, "Gear 4 Ratio", "11.21", "engine_gear_ratio_4")
-        self.create_labeled_entry(engine_frame, "Gear 5 Ratio", "9.40", "engine_gear_ratio_5")
-        self.create_labeled_entry(engine_frame, "Gear 6 Ratio", "0", "engine_gear_ratio_6")
-
-        self.engine_results_label = ctk.CTkLabel(
-            engine_frame,
-            text="",
-            justify="left",
-            font=("Segoe UI", 11),
-            text_color=COLORS['primary']
-        )
-        self.engine_results_label.pack(anchor="w", padx=16, pady=(2, 8))
-
-        self.engine_dataframe = None
-        self.engine_efficiency_curves = {}
-        self.engine_secondary_ax = None
-        self.motor_curve_source = None
-        
         # --- Motor Curve Upload Section ---
         # NB: despite the key name, in Drive Cycle mode this section hosts the
         # *motor* data upload row (packed in via show_sections_for_analysis).
@@ -788,8 +715,20 @@ class TorqueSpeedApp(
 
 
         self.sections['env'] = self.create_section(input_frame, "Environment Conditions", "#f1f5f9")
-        self.create_labeled_entry(self.sections['env'], "Ambient Temperature (Â°C)", "25", "ambient_temp")
+        self.create_labeled_entry(self.sections['env'], "Ambient Temperature (°C)", "25", "ambient_temp")
         self.create_labeled_entry(self.sections['env'], "Ambient Pressure (kPa)", "1.01325", "ambient_pressure")
+        # Make explicit what these two fields actually influence, so users
+        # don't expect the drag force itself to change with temperature.
+        ctk.CTkLabel(
+            self.sections['env'],
+            text=("Note: temperature/pressure only adjust the CdA estimate.\n"
+                  "Aero drag force uses fixed air density 1.225 kg/m³, unless\n"
+                  "'Altitude-corrected air density' below is ON (Range analysis)."),
+            font=("Segoe UI", 10),
+            text_color=COLORS['text_muted'],
+            justify="left",
+            anchor="w",
+        ).pack(fill="x", padx=16, pady=(0, 6))
         # Optional ISA altitude-corrected air density (off by default -> identical
         # to the fixed rho=1.225 used everywhere else). Read by Range analysis.
         r = self.create_control_row(self.sections['env'], "Altitude-corrected air density")
@@ -798,150 +737,8 @@ class TorqueSpeedApp(
         self.alt_density_toggle.pack(side="right")
         self.create_labeled_entry(self.sections['env'], "Altitude (m)  [density model]", "0", "altitude_m")
 
-        # --- Range Analysis: Battery Inputs ---
-        self.sections['range_battery'] = self.create_section(input_frame, "Range Analysis - Battery Inputs", "#f1f5f9")
-        range_battery_frame = self.sections['range_battery']
-        self.create_labeled_entry(range_battery_frame, "Cells Parallel", "14", "cells_parallel")
-        self.create_labeled_entry(range_battery_frame, "Cells Series", "7", "cells_series")
-        self.create_labeled_entry(range_battery_frame, "Cell Capacity (Ah)", "4.8", "cell_capacity")
-        self.create_labeled_entry(range_battery_frame, "Cell Voltage (V)", "3.7", "cell_voltage")
-        self.create_labeled_entry(range_battery_frame, "Cell Efficiency (%)", "100", "cell_efficiency")
-        self.create_labeled_entry(range_battery_frame, "Depth of Discharge - DoD (%)", "95", "dod")
-        self.create_labeled_entry(range_battery_frame, "Auxiliary Loss (W)", "25", "aux_loss")
-        r = self.create_control_row(range_battery_frame, "Regen power cap (W)  [blank = none]")
-        self.regen_cap_w = ctk.CTkEntry(r, width=110, placeholder_text="no cap")
-        self.regen_cap_w.pack(side="right")
-        r = self.create_control_row(range_battery_frame, "Energy integration")
-        self.integration_method = ctk.CTkSegmentedButton(
-            r, values=["Rectangular", "Trapezoidal"])
-        self.integration_method.set("Rectangular")
-        self.integration_method.pack(side="right")
-
-        # --- Range Analysis: Efficiency Inputs ---
-        self.sections['range_efficiency'] = self.create_section(input_frame, "Range Analysis - Motor/Controller Efficiency", "#f1f5f9")
-        range_eff_frame = self.sections['range_efficiency']
-        self.range_eff_auto_note = ctk.CTkLabel(
-            range_eff_frame,
-            text="Auto-linked: Motor 1 map -> Range Motor, Motor 2 map -> Range Controller (from Drive Cycle Efficiency section)",
-            font=("Segoe UI", 10),
-            text_color=COLORS['text'],
-            justify="left",
-            anchor="w",
-        )
-        self.range_eff_auto_note.pack(fill="x", padx=16, pady=(4, 2))
-
-        self.range_motor_eff_row = ctk.CTkFrame(range_eff_frame, fg_color="transparent")
-        self.range_motor_eff_row.pack(fill="x", pady=(8, 2), padx=8)
-        self.range_motor_eff_upload_button = ctk.CTkButton(
-            self.range_motor_eff_row,
-            text="Upload Motor Efficiency Map Excel",
-            command=lambda: self.upload_range_efficiency_map(kind="motor")
-        )
-        self.range_motor_eff_upload_button.pack(side="left", padx=(0, 6), fill='x', expand=True)
-        self.range_motor_eff_indicator = ctk.CTkLabel(
-            self.range_motor_eff_row,
-            text="\u274C",
-            text_color=COLORS['warning'],
-            font=("Segoe UI", 18)
-        )
-        self.range_motor_eff_indicator.pack(side="left", padx=(0, 6))
-        self.range_motor_eff_delete_button = ctk.CTkButton(
-            self.range_motor_eff_row,
-            text="Delete",
-            fg_color=COLORS['warning'],
-            text_color="white",
-            command=lambda: self.delete_range_efficiency_map(kind="motor"),
-            width=60
-        )
-        self.range_motor_eff_delete_button.pack(side="left")
-        self.range_motor_eff_delete_button.configure(state="disabled")
-
-        self.range_controller_eff_row = ctk.CTkFrame(range_eff_frame, fg_color="transparent")
-        self.range_controller_eff_row.pack(fill="x", pady=(2, 8), padx=8)
-        self.range_controller_eff_upload_button = ctk.CTkButton(
-            self.range_controller_eff_row,
-            text="Upload Controller Efficiency Map Excel",
-            command=lambda: self.upload_range_efficiency_map(kind="controller")
-        )
-        self.range_controller_eff_upload_button.pack(side="left", padx=(0, 6), fill='x', expand=True)
-        self.range_controller_eff_indicator = ctk.CTkLabel(
-            self.range_controller_eff_row,
-            text="\u274C",
-            text_color=COLORS['warning'],
-            font=("Segoe UI", 18)
-        )
-        self.range_controller_eff_indicator.pack(side="left", padx=(0, 6))
-        self.range_controller_eff_delete_button = ctk.CTkButton(
-            self.range_controller_eff_row,
-            text="Delete",
-            fg_color=COLORS['warning'],
-            text_color="white",
-            command=lambda: self.delete_range_efficiency_map(kind="controller"),
-            width=60
-        )
-        self.range_controller_eff_delete_button.pack(side="left")
-        self.range_controller_eff_delete_button.configure(state="disabled")
-
-        self.create_labeled_entry(range_eff_frame, "Motor Efficiency Constant (0-1)", "0.90", "motor_eff_const")
-        self.create_labeled_entry(range_eff_frame, "Controller Efficiency Constant (0-1)", "0.95", "controller_eff_const")
-
-        self.range_motor_efficiency_map = None
-        self.range_motor_eff_map_torques = None
-        self.range_motor_eff_map_rpms = None
-        self.range_controller_efficiency_map = None
-        self.range_controller_eff_map_torques = None
-        self.range_controller_eff_map_rpms = None
-
-        # --- Range Analysis: Plot View ---
-        self.sections['range_plot'] = self.create_section(input_frame, "Range Analysis - Plot View", "#f1f5f9")
-        range_plot_frame = self.sections['range_plot']
-        range_plot_row = ctk.CTkFrame(range_plot_frame, fg_color="transparent")
-        range_plot_row.pack(fill="x", padx=8, pady=(4, 0))
-        ctk.CTkLabel(
-            range_plot_row,
-            text="Select Plot:",
-            font=("Segoe UI", 12),
-            text_color=COLORS['primary']
-        ).pack(side="left", padx=(16, 8), pady=10)
-        # Foldable (dropdown) list rather than an always-expanded segmented
-        # button -- same 9 views, far less horizontal space.
-        self.range_plot_toggle = ctk.CTkComboBox(
-            range_plot_row,
-            values=[
-                "All",
-                "Power",
-                "Energy",
-                "C-rate",
-                "Loss",
-                "Waterfall",
-                "Drive",
-                "M Eff",
-                "C Eff",
-            ],
-            width=160,
-            command=lambda _choice: self.plot_graph()
-        )
-        self.range_plot_toggle.set("All")
-        self.range_plot_toggle.pack(side="left", padx=(0, 8), pady=10)
-        self.range_toggle_hint = ctk.CTkLabel(
-            range_plot_frame,
-            text="Drive=Drive Cycle, M Eff=Motor Map, C Eff=Controller Map",
-            font=("Segoe UI", 10),
-            text_color=COLORS['text']
-        )
-        self.range_toggle_hint.pack(fill="x", padx=16, pady=(0, 4))
-
-        self.range_results_frame = ctk.CTkFrame(range_plot_frame, fg_color="transparent")
-        self.range_results_frame.pack(fill="x", padx=8, pady=(2, 8))
-        self.range_results_label = ctk.CTkLabel(
-            self.range_results_frame,
-            text="Range summary will appear here after calculation.",
-            justify="left",
-            font=("Segoe UI", 12),
-            text_color=COLORS['primary'],
-            anchor="w",
-        )
-        self.range_results_label.pack(fill="x", padx=8)
+        # --- Range Analysis sections (built in their own method) ---
+        self._build_range_sections(input_frame)
 
         # --- Drive Cycle Properties Table Section ---
         self.sections['drive_cycle_props'] = self.create_section(input_frame, "Drive Cycle Properties", "#f1f5f9")
@@ -1033,9 +830,10 @@ class TorqueSpeedApp(
                     _secs.insert(_secs.index('graph_settings'), 'efficiency_data')
                 else:
                     _secs.append('efficiency_data')
-        # Add Update Plot Button
+        # The in-scroll Update Plot button was removed -- the pinned button at the
+        # top of the panel is the single Update action. The attribute survives
+        # (never packed) so existing pack_forget() calls stay harmless.
         self.update_button = ctk.CTkButton(input_frame, text="Update Plot", command=self.update_plot)
-        self.update_button.pack(pady=10)
         self.params_label = ctk.CTkLabel(input_frame, text="", justify="left")
         self.params_label.pack(pady=10, anchor="w")
 
@@ -1059,47 +857,28 @@ class TorqueSpeedApp(
 
      
         
-        # Tyre specification mapping
-        self.tyre_radius_map = {
-
-            # ðŸ›µ Small scooters (older IC + entry EV)
-            "3.00-10": 0.2032,
-            "3.50-10": 0.2159,
-
-            # ðŸ›µ 12-inch scooters (MOST COMMON: TVS, Ola, Bajaj, Ather)
-            "90/90-12": 0.2334,
-            "90/100-12": 0.2424,
-            "100/80-12": 0.2360,
-            "110/70-12": 0.2388,
-            "110/80-12": 0.2480,
-
-            # ðŸ›µ 10-inch wider tyres (rare but used)
-            "120/70-10": 0.2220,
-
-            # ðŸï¸ Commuter bikes (IC engines - Splendor, Shine, Raider, etc.)
-            "2.75-17": 0.2850,
-            "3.00-17": 0.2960,
-            "80/100-17": 0.2950,
-            "90/90-17": 0.3040,
-            "100/80-17": 0.3010,
-
-            # ðŸï¸ Premium commuters / sporty (Apache, Pulsar, etc.)
-            "110/70-17": 0.3100,
-            "120/70-17": 0.3160,
-            "130/70-17": 0.3230,
-            "140/70-17": 0.3300,
-
-            # ðŸï¸ Off-road / ADV / dual sport
-            "90/90-19": 0.3410,
-            "100/90-19": 0.3510,
-            "110/90-19": 0.3610,
-
-            "120/90-17": 0.3350,   # rear dual sport
-
-            # ðŸï¸ Larger bikes / cruisers
-            "150/80-16": 0.3320,
-            "170/80-15": 0.3360
-        }
+        # Tyre specification mapping. Static radii are COMPUTED from the size
+        # designation (rim/2 + section height -- see tyre_static_radius_m in
+        # ui_helpers.py) so every value is consistent with its spec; the old
+        # hand-typed table had several entries 5-20 mm too large.
+        tyre_specs = [
+            # Small scooters (older IC + entry EV)
+            "3.00-10", "3.50-10",
+            # 12-inch scooters (MOST COMMON: TVS, Ola, Bajaj, Ather)
+            "90/90-12", "90/100-12", "100/80-12", "110/70-12", "110/80-12",
+            # 10-inch wider tyres (rare but used)
+            "120/70-10",
+            # Commuter bikes (IC engines - Splendor, Shine, Raider, etc.)
+            "2.75-17", "3.00-17", "80/100-17", "90/90-17", "100/80-17",
+            # Premium commuters / sporty (Apache, Pulsar, etc.)
+            "110/70-17", "120/70-17", "130/70-17", "140/70-17",
+            # Off-road / ADV / dual sport
+            "90/90-19", "100/90-19", "110/90-19",
+            "120/90-17",   # rear dual sport
+            # Larger bikes / cruisers
+            "150/80-16", "170/80-15",
+        ]
+        self.tyre_radius_map = {s: self.tyre_static_radius_m(s) for s in tyre_specs}
 
         # Track if wheel radius was manually edited
         self.wheel_radius_user_modified = False
@@ -1120,6 +899,10 @@ class TorqueSpeedApp(
         )
         self.tyre_spec_combo.set("Select Tyre Type")
         self.tyre_spec_combo.pack(fill="x", padx=16, pady=(0, 8))
+        # Editing the factor re-applies the selected tyre's radius immediately
+        # (previously the factor only took effect when re-picking a tyre).
+        self.dynamic_radius_factor.bind("<KeyRelease>", self.on_dynamic_radius_factor_change)
+        self.dynamic_radius_factor.bind("<FocusOut>", self.on_dynamic_radius_factor_change)
         self.speed_unit_combo.configure(command=self.on_plot_mode_change)
         self.plot_part_combo.configure(command=self.on_plot_mode_change)
         # Torque<->Force switches which sim fields are relevant (Nm vs N y-limit),
@@ -1137,6 +920,272 @@ class TorqueSpeedApp(
         # Start with every section collapsed for a compact, less-cluttered panel.
         self.collapse_all_sections()
 
-        self.set_status("Ready. Choose an analysis and press Enter (or Update Plot).", "info")
+        # Log uncaught Tk-callback errors to vmi_app.log instead of dying
+        # silently on stderr; surface them in the status bar too.
+        from . import applog
+        self._log = applog.setup()
+
+        def _tk_callback_error(exc, val, tb):
+            import traceback
+            self._log.error("Uncaught error in Tk callback:\n%s",
+                            "".join(traceback.format_exception(exc, val, tb)))
+            try:
+                self.set_status(f"Error: {val}", "error")
+            except Exception:
+                pass
+        self.report_callback_exception = _tk_callback_error
+
+        # Session persistence: autosave the full UI state on close and restore
+        # it on the next launch (silent no-op when no previous session exists).
+        self.protocol("WM_DELETE_WINDOW", self._on_app_close)
+        restored = self.restore_last_session()
+        if not restored:
+            self.set_status("Ready. Choose an analysis and press Enter (or Update Plot).", "info")
+
+    # ------------------------------------------------------------------ #
+    #  Section builders (extracted verbatim from __init__ -- same widgets,
+    #  same attribute names, same defaults; only the housing changed).
+    # ------------------------------------------------------------------ #
+
+    def _build_engine_analysis_section(self, input_frame):
+        self.sections['engine_analysis'] = self.create_section(input_frame, "Engine Analysis", "#f1f5f9")
+        engine_frame = self.sections['engine_analysis']
+
+        self.engine_data_row = ctk.CTkFrame(engine_frame, fg_color="transparent")
+        self.engine_data_row.pack(fill="x", pady=(8, 2), padx=8)
+        self.engine_data_upload_button = ctk.CTkButton(
+            self.engine_data_row,
+            text="Upload Engine Torque-RPM Excel",
+            command=self.load_engine_data_excel
+        )
+        self.engine_data_upload_button.pack(side="left", padx=(0, 6), fill='x', expand=True)
+        self.engine_data_indicator = ctk.CTkLabel(
+            self.engine_data_row,
+            text="❌",
+            text_color=COLORS['warning'],
+            font=("Segoe UI", 18)
+        )
+        self.engine_data_indicator.pack(side="left", padx=(0, 6))
+        self.engine_data_delete_button = ctk.CTkButton(
+            self.engine_data_row,
+            text="Delete",
+            fg_color=COLORS['warning'],
+            text_color="white",
+            command=self.delete_engine_data,
+            width=60
+        )
+        self.engine_data_delete_button.pack(side="left")
+        self.engine_data_delete_button.configure(state="disabled")
+
+        self.engine_eff_row = ctk.CTkFrame(engine_frame, fg_color="transparent")
+        self.engine_eff_row.pack(fill="x", pady=(2, 8), padx=8)
+        self.engine_eff_upload_button = ctk.CTkButton(
+            self.engine_eff_row,
+            text="Upload Gear Efficiency Excel (Sheets: G1..G6)",
+            command=self.load_engine_efficiency_excel
+        )
+        self.engine_eff_upload_button.pack(side="left", padx=(0, 6), fill='x', expand=True)
+        self.engine_eff_indicator = ctk.CTkLabel(
+            self.engine_eff_row,
+            text="❌",
+            text_color=COLORS['warning'],
+            font=("Segoe UI", 18)
+        )
+        self.engine_eff_indicator.pack(side="left", padx=(0, 6))
+        self.engine_eff_delete_button = ctk.CTkButton(
+            self.engine_eff_row,
+            text="Delete",
+            fg_color=COLORS['warning'],
+            text_color="white",
+            command=self.delete_engine_efficiency_data,
+            width=60
+        )
+        self.engine_eff_delete_button.pack(side="left")
+        self.engine_eff_delete_button.configure(state="disabled")
+
+        engine_mode_row = ctk.CTkFrame(engine_frame, fg_color="transparent")
+        engine_mode_row.pack(fill="x", pady=(0, 6), padx=8)
+        ctk.CTkLabel(
+            engine_mode_row,
+            text="Plot Output:",
+            font=("Segoe UI", 12),
+            text_color=COLORS['primary']
+        ).pack(side="left", padx=(0, 8))
+        self.engine_output_combo = ctk.CTkComboBox(
+            engine_mode_row,
+            values=["Wheel Torque (Nm)", "Wheel Force (N)"],
+            font=("Segoe UI", 12),
+            width=180,
+            command=lambda _choice: self.plot_graph(),
+        )
+        self.engine_output_combo.set("Wheel Torque (Nm)")
+        self.engine_output_combo.pack(side="left")
+
+        self.create_labeled_entry(engine_frame, "Gear 1 Ratio", "31.15", "engine_gear_ratio_1")
+        self.create_labeled_entry(engine_frame, "Gear 2 Ratio", "19.83", "engine_gear_ratio_2")
+        self.create_labeled_entry(engine_frame, "Gear 3 Ratio", "14.24", "engine_gear_ratio_3")
+        self.create_labeled_entry(engine_frame, "Gear 4 Ratio", "11.21", "engine_gear_ratio_4")
+        self.create_labeled_entry(engine_frame, "Gear 5 Ratio", "9.40", "engine_gear_ratio_5")
+        self.create_labeled_entry(engine_frame, "Gear 6 Ratio", "0", "engine_gear_ratio_6")
+
+        self.engine_results_label = ctk.CTkLabel(
+            engine_frame,
+            text="",
+            justify="left",
+            font=("Segoe UI", 11),
+            text_color=COLORS['primary']
+        )
+        self.engine_results_label.pack(anchor="w", padx=16, pady=(2, 8))
+
+        self.engine_dataframe = None
+        self.engine_efficiency_curves = {}
+        self.engine_secondary_ax = None
+        self.motor_curve_source = None
+
+    def _build_range_sections(self, input_frame):
+        # --- Range Analysis: Battery Inputs ---
+        self.sections['range_battery'] = self.create_section(input_frame, "Range Analysis - Battery Inputs", "#f1f5f9")
+        range_battery_frame = self.sections['range_battery']
+        self.create_labeled_entry(range_battery_frame, "Cells Parallel", "14", "cells_parallel")
+        self.create_labeled_entry(range_battery_frame, "Cells Series", "7", "cells_series")
+        self.create_labeled_entry(range_battery_frame, "Cell Capacity (Ah)", "4.8", "cell_capacity")
+        self.create_labeled_entry(range_battery_frame, "Cell Voltage (V)", "3.7", "cell_voltage")
+        self.create_labeled_entry(range_battery_frame, "Cell Efficiency (%)", "100", "cell_efficiency")
+        self.create_labeled_entry(range_battery_frame, "Depth of Discharge - DoD (%)", "95", "dod")
+        self.create_labeled_entry(range_battery_frame, "Auxiliary Loss (W)", "25", "aux_loss")
+        r = self.create_control_row(range_battery_frame, "Regen power cap (W)  [blank = none]")
+        self.regen_cap_w = ctk.CTkEntry(r, width=110, placeholder_text="no cap")
+        self.regen_cap_w.pack(side="right")
+        r = self.create_control_row(range_battery_frame, "Energy integration")
+        self.integration_method = ctk.CTkSegmentedButton(
+            r, values=["Rectangular", "Trapezoidal"])
+        self.integration_method.set("Rectangular")
+        self.integration_method.pack(side="right")
+
+        # --- Range Analysis: Efficiency Inputs ---
+        self.sections['range_efficiency'] = self.create_section(input_frame, "Range Analysis - Motor/Controller Efficiency", "#f1f5f9")
+        range_eff_frame = self.sections['range_efficiency']
+        self.range_eff_auto_note = ctk.CTkLabel(
+            range_eff_frame,
+            text="Auto-linked: Motor 1 map -> Range Motor, Motor 2 map -> Range Controller (from Drive Cycle Efficiency section)",
+            font=("Segoe UI", 10),
+            text_color=COLORS['text'],
+            justify="left",
+            anchor="w",
+        )
+        self.range_eff_auto_note.pack(fill="x", padx=16, pady=(4, 2))
+
+        self.range_motor_eff_row = ctk.CTkFrame(range_eff_frame, fg_color="transparent")
+        self.range_motor_eff_row.pack(fill="x", pady=(8, 2), padx=8)
+        self.range_motor_eff_upload_button = ctk.CTkButton(
+            self.range_motor_eff_row,
+            text="Upload Motor Efficiency Map Excel",
+            command=lambda: self.upload_range_efficiency_map(kind="motor")
+        )
+        self.range_motor_eff_upload_button.pack(side="left", padx=(0, 6), fill='x', expand=True)
+        self.range_motor_eff_indicator = ctk.CTkLabel(
+            self.range_motor_eff_row,
+            text="❌",
+            text_color=COLORS['warning'],
+            font=("Segoe UI", 18)
+        )
+        self.range_motor_eff_indicator.pack(side="left", padx=(0, 6))
+        self.range_motor_eff_delete_button = ctk.CTkButton(
+            self.range_motor_eff_row,
+            text="Delete",
+            fg_color=COLORS['warning'],
+            text_color="white",
+            command=lambda: self.delete_range_efficiency_map(kind="motor"),
+            width=60
+        )
+        self.range_motor_eff_delete_button.pack(side="left")
+        self.range_motor_eff_delete_button.configure(state="disabled")
+
+        self.range_controller_eff_row = ctk.CTkFrame(range_eff_frame, fg_color="transparent")
+        self.range_controller_eff_row.pack(fill="x", pady=(2, 8), padx=8)
+        self.range_controller_eff_upload_button = ctk.CTkButton(
+            self.range_controller_eff_row,
+            text="Upload Controller Efficiency Map Excel",
+            command=lambda: self.upload_range_efficiency_map(kind="controller")
+        )
+        self.range_controller_eff_upload_button.pack(side="left", padx=(0, 6), fill='x', expand=True)
+        self.range_controller_eff_indicator = ctk.CTkLabel(
+            self.range_controller_eff_row,
+            text="❌",
+            text_color=COLORS['warning'],
+            font=("Segoe UI", 18)
+        )
+        self.range_controller_eff_indicator.pack(side="left", padx=(0, 6))
+        self.range_controller_eff_delete_button = ctk.CTkButton(
+            self.range_controller_eff_row,
+            text="Delete",
+            fg_color=COLORS['warning'],
+            text_color="white",
+            command=lambda: self.delete_range_efficiency_map(kind="controller"),
+            width=60
+        )
+        self.range_controller_eff_delete_button.pack(side="left")
+        self.range_controller_eff_delete_button.configure(state="disabled")
+
+        self.create_labeled_entry(range_eff_frame, "Motor Efficiency Constant (0-1)", "0.90", "motor_eff_const")
+        self.create_labeled_entry(range_eff_frame, "Controller Efficiency Constant (0-1)", "0.95", "controller_eff_const")
+
+        self.range_motor_efficiency_map = None
+        self.range_motor_eff_map_torques = None
+        self.range_motor_eff_map_rpms = None
+        self.range_controller_efficiency_map = None
+        self.range_controller_eff_map_torques = None
+        self.range_controller_eff_map_rpms = None
+
+        # --- Range Analysis: Plot View ---
+        self.sections['range_plot'] = self.create_section(input_frame, "Range Analysis - Plot View", "#f1f5f9")
+        range_plot_frame = self.sections['range_plot']
+        range_plot_row = ctk.CTkFrame(range_plot_frame, fg_color="transparent")
+        range_plot_row.pack(fill="x", padx=8, pady=(4, 0))
+        ctk.CTkLabel(
+            range_plot_row,
+            text="Select Plot:",
+            font=("Segoe UI", 12),
+            text_color=COLORS['primary']
+        ).pack(side="left", padx=(16, 8), pady=10)
+        # Foldable (dropdown) list rather than an always-expanded segmented
+        # button -- same 9 views, far less horizontal space.
+        self.range_plot_toggle = ctk.CTkComboBox(
+            range_plot_row,
+            values=[
+                "All",
+                "Power",
+                "Energy",
+                "C-rate",
+                "Loss",
+                "Waterfall",
+                "Drive",
+                "M Eff",
+                "C Eff",
+            ],
+            width=160,
+            command=lambda _choice: self.plot_graph()
+        )
+        self.range_plot_toggle.set("All")
+        self.range_plot_toggle.pack(side="left", padx=(0, 8), pady=10)
+        self.range_toggle_hint = ctk.CTkLabel(
+            range_plot_frame,
+            text="Drive=Drive Cycle, M Eff=Motor Map, C Eff=Controller Map",
+            font=("Segoe UI", 10),
+            text_color=COLORS['text']
+        )
+        self.range_toggle_hint.pack(fill="x", padx=16, pady=(0, 4))
+
+        self.range_results_frame = ctk.CTkFrame(range_plot_frame, fg_color="transparent")
+        self.range_results_frame.pack(fill="x", padx=8, pady=(2, 8))
+        self.range_results_label = ctk.CTkLabel(
+            self.range_results_frame,
+            text="Range summary will appear here after calculation.",
+            justify="left",
+            font=("Segoe UI", 12),
+            text_color=COLORS['primary'],
+            anchor="w",
+        )
+        self.range_results_label.pack(fill="x", padx=8)
 
 

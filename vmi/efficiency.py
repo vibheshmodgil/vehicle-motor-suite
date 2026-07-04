@@ -15,6 +15,7 @@ from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
 from .physics import calculate_crr_cd_a, df, g
+from .applog import logger
 
 
 
@@ -140,10 +141,15 @@ class EfficiencyMixin:
 
         max_speed_val = float(np.nanmax(rpm))
         max_torque_val = float(np.nanmax(tq))
-        positive_tq = tq[tq > 0]
-        min_torque_val = float(np.nanmin(positive_tq)) if positive_tq.size else max(max_torque_val, 1e-6)
-        rated_speed_val = (min_torque_val * max_speed_val) / max(max_torque_val, 1e-9)
-        max_power_val = ((max_speed_val * min_torque_val * 2 * np.pi) / 60.0) / 1000.0
+        # Map axes only tell us the grid extent, not the real base speed or
+        # power rating -- so autofill an envelope equal to the full map
+        # rectangle (rated speed = max speed, power = corner power). The old
+        # derivation used the torque AXIS MINIMUM as "torque at max speed",
+        # which gave absurdly low rated speed/power and masked off most of the
+        # map. Enter the motor's true rated speed / max power manually (the
+        # fields stay editable) to get real power-limited masking.
+        rated_speed_val = max_speed_val
+        max_power_val = (max_torque_val * max_speed_val * 2 * np.pi / 60.0) / 1000.0
 
         if motor == 1:
             if not self.motor1_max_speed_manual:
@@ -225,7 +231,30 @@ class EfficiencyMixin:
         (Max Speed / Rated Speed / Max Torque / Max Power) aren't filled in or
         aren't valid yet, so a map still displays in full before those fields
         are populated.
+
+        If a motor torque-speed curve has been uploaded (motor_dataframe), the
+        UPLOADED curve is the envelope: a point is kept iff its |torque| is at
+        or below the curve at that RPM (and within the curve's speed range).
+        That is exactly "reject only points outside the motor's torque-speed
+        curve" -- no parametric approximation.
         """
+        rpm_abs = np.abs(np.asarray(rpm_grid, dtype=float))
+        tq_abs = np.abs(np.asarray(torque_grid, dtype=float))
+
+        # Preferred envelope: the actual uploaded motor curve.
+        mdf = getattr(self, "motor_dataframe", None)
+        if mdf is not None:
+            try:
+                df_sorted = mdf.sort_values("motor_speed")
+                curve_rpm = df_sorted["motor_speed"].to_numpy(dtype=float)
+                curve_tq = df_sorted["motor_torque"].to_numpy(dtype=float)
+                if curve_rpm.size >= 2:
+                    cap = np.interp(rpm_abs, curve_rpm, curve_tq,
+                                    left=curve_tq[0], right=0.0)
+                    return tq_abs <= cap + 1e-9
+            except Exception:
+                pass  # fall through to the parametric envelope
+
         try:
             max_speed, rated_speed, max_torque, max_power = self.get_motor_params(motor)
         except Exception:
@@ -235,8 +264,6 @@ class EfficiencyMixin:
         if rated_speed <= 0 or rated_speed > max_speed:
             rated_speed = max_speed
 
-        rpm_abs = np.abs(np.asarray(rpm_grid, dtype=float))
-        tq_abs = np.abs(np.asarray(torque_grid, dtype=float))
         omega = np.maximum(rpm_abs, 1e-6) * 2.0 * np.pi / 60.0
         power_w = max_power * 1000.0
         cap = np.where(rpm_abs <= rated_speed, max_torque, power_w / omega)
@@ -812,7 +839,7 @@ class EfficiencyMixin:
             self.figure.tight_layout()
             self.canvas.draw()
         except Exception as e:
-            print("Error plotting combined efficiency map:", e)
+            logger.error("Error plotting combined efficiency map: %s", e)
             messagebox.showerror("Plot Error", str(e))
 
     def plot_efficiency_map_motor1(self):
@@ -864,7 +891,7 @@ class EfficiencyMixin:
             self.figure.tight_layout()
             self.canvas.draw()
         except Exception as e:
-            print("Error plotting Motor 1 efficiency map:", e)
+            logger.error("Error plotting Motor 1 efficiency map: %s", e)
             messagebox.showerror("Plot Error", str(e))
 
 
@@ -916,7 +943,7 @@ class EfficiencyMixin:
             self.figure.tight_layout()
             self.canvas.draw()
         except Exception as e:
-            print("Error plotting Motor 2 efficiency map:", e)
+            logger.error("Error plotting Motor 2 efficiency map: %s", e)
             messagebox.showerror("Plot Error", str(e))
 
 
@@ -991,6 +1018,6 @@ class EfficiencyMixin:
             self.figure.tight_layout()
             self.canvas.draw()
         except Exception as e:
-            print("Error plotting efficiency difference map:", e)
+            logger.error("Error plotting efficiency difference map: %s", e)
             messagebox.showerror("Plot Error", str(e))
         

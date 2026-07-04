@@ -37,9 +37,12 @@ python main.py        # primary entry point
 python -m vmi         # equivalent (vmi/__main__.py)
 ```
 
-There is **no build step, no test suite**. It is a plain Python GUI app.
-Verifying a change means running the app and exercising the affected analysis
-mode — there is no automated coverage to lean on.
+There is **no build step**. It is a plain Python GUI app. There IS now a small
+test suite: `python -m pytest tests/` runs golden-value regression tests over
+`physics.py`, `calc_ext.py`, `units.py`, `formatting.py`, and `validation.py`.
+**These tests lock the calibrated numbers** — a failure means a formula
+changed, which must only happen on an explicit request. GUI behavior still
+needs manual verification by running the app.
 
 ### Dependencies (install with `pip install -r requirements.txt`)
 `customtkinter`, `matplotlib`, `numpy`, `pandas`, `scipy`, `seaborn`,
@@ -47,9 +50,7 @@ mode — there is no automated coverage to lean on.
 `pypdf`, `python-docx` for the assistant sidebar (§7c). Standard-library
 `tkinter` must be present (ships with CPython on Windows).
 
-> **TODO worth doing early:** pin versions in `requirements.txt`. None are
-> pinned yet, and pinning (especially `customtkinter`, which makes breaking
-> changes) will save pain later.
+Versions in `requirements.txt` are pinned to the tested set (done 2026-07).
 
 ### Sample test data
 `python generate_sample_data.py` writes ready-to-load dummy Excel files into
@@ -167,6 +168,8 @@ vmi/app.py
 | `physics.py` | (module) | `calculate_crr_cd_a()` + the reference-mass lookup `df`, gravity `g`. **Core formulas — verbatim.** |
 | `calc_ext.py` | (module) | Optional/advanced physics helpers: ISA air density, speed-dependent rolling force, trapezoidal energy, regen cap, invariant checks. |
 | `formatting.py` | (module) | `fmt`, `fmt_wh`, `fmt_km`, `fmt_pct` number formatters. |
+| `units.py` | (module) | Tested km/h↔m/s↔RPM↔rad/s conversion helpers. New code should use these; existing verbatim plot code may keep its inline math. |
+| `applog.py` | (module) | Rotating error log (`vmi_app.log`). Uncaught Tk-callback errors are logged via the `report_callback_exception` hook installed in `app.py`; use `from .applog import logger` for module-level error logging. |
 | `validation.py` | (module) | `parse_float()` with red-border marking, `ValidationError`, `clear_marks`. |
 | `ui_helpers.py` | `HelpersMixin` | `create_section`, `create_labeled_entry`, header, menu bar, axis-clearing, all the `on_*_manual_edit` flag setters, tyre→radius. |
 | `limits.py` | `LimitsMixin` | All axis-limit logic (`get_x_limits`, `get_y_limits`, force variants, compare-std limits). |
@@ -195,8 +198,12 @@ Understanding one round-trip lets you navigate everything:
 1. User picks an **Analysis Type** in `self.plot_type` (combobox in `app.py`),
    or presses **Update Plot** / **Enter**.
 2. `DispatchMixin.update_plot()` sets `self.plot_mode = self.plot_type.get()`,
-   then calls `show_sections_for_analysis()` then `plot_graph()` (or
-   `update_compare_std_plot()` for the compare mode).
+   then calls `show_sections_for_analysis()` then routes through
+   `EnhancementsMixin._safe_plot()` (busy cursor, red-bordered bad fields,
+   errors to the status bar) which dispatches to `plot_graph()` or
+   `update_compare_std_plot()`. `plot_graph()` itself validates its inputs
+   with `validation.parse_float` (collect-all-errors, no modal spam) before
+   computing anything.
 3. `show_sections_for_analysis()` uses **`self.analysis_sections`** (a dict in
    `app.py`, ~line 894) mapping each analysis name → the list of section keys to
    show. It `pack_forget()`s everything then re-packs the relevant sections.
@@ -363,6 +370,16 @@ input-parameters modal on an explicit button press, not on graph-setting replots
 **Drive Cycle auto-shows.** When the analysis is "Drive Cycle" and
 `self.dataframe` is loaded, `plot_graph` calls `plot_drive_cycle()` automatically
 instead of showing the "click the plot button" placeholder.
+
+**Sessions auto-persist.** The full UI state (same collector as scenarios,
+`_collect_scenario_data`) is silently written to `vmi_last_session.json` on
+window close (`_on_app_close`, wired via `WM_DELETE_WINDOW`) and restored on
+the next launch (`restore_last_session`). Delete the file to start clean.
+
+**Data checklist.** `update_data_checklist()` (`ui_helpers.py`) renders a
+✔/✖ required-vs-optional upload summary under the Analysis Type selector,
+refreshed from `show_sections_for_analysis`. If you add an analysis that
+needs uploads, add its entry to the `needs` dict there.
 
 **Scenarios persist loaded data.** `save_scenario`/`load_scenario` in
 `enhancements.py` now also serialize loaded datasets under a `__datasets__` key

@@ -171,7 +171,6 @@ class LimitsMixin:
                 ])
 
                y_max = max_y * 1.1
-               print(max_y)
             else:
                 y_max = 100  # fallback
             ylim_entry.delete(0, "end")

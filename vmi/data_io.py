@@ -14,6 +14,7 @@ from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
 from .physics import calculate_crr_cd_a, df, g
+from .applog import logger
 
 
 
@@ -219,8 +220,6 @@ class DataIOMixin:
                         messagebox.showerror("Column Error", "Invalid column names selected.")
                         return
                     self.dataframe = df[[time_col, speed_col]].rename(columns={time_col: "dc_time", speed_col: "dc_speed"})
-                    print("Excel file loaded successfully!")
-                    print(self.dataframe.head())
                     self.drive_cycle_indicator.configure(text="\u2705", text_color=COLORS['success'])
                     self.drive_cycle_delete_button.configure(state="normal")
                     self.plot_drive_cycle_button.configure(state="normal")
@@ -241,7 +240,7 @@ class DataIOMixin:
                 confirm_btn.pack(pady=15)
 
             except Exception as e:
-                print(f"Error loading Excel file: {e}")
+                logger.error("Error loading Excel file: %s", e)
                 self.drive_cycle_indicator.configure(text="\u274C", text_color=COLORS['warning'])
                 self.drive_cycle_delete_button.configure(state="disabled")
                 self.dataframe = None
@@ -297,8 +296,6 @@ class DataIOMixin:
                         return
                     self.motor_dataframe = df[[torque_col, speed_col]].rename(columns={torque_col: "motor_torque", speed_col: "motor_speed"})
                     self.motor_curve_source = "uploaded_motor"
-                    print("Motor data file loaded successfully!")
-                    print(self.motor_dataframe.head())
                     self.motor_data_indicator.configure(text="\u2705", text_color=COLORS['success'])
                     self.motor_data_delete_button.configure(state="normal")
                     try:
@@ -321,7 +318,7 @@ class DataIOMixin:
                 confirm_btn.pack(pady=15)
 
             except Exception as e:
-                print(f"Error loading Motor Data Excel file: {e}")
+                logger.error("Error loading Motor Data Excel file: %s", e)
                 self.motor_data_indicator.configure(text="\u274C", text_color=COLORS['warning'])
                 self.motor_data_delete_button.configure(state="disabled")
                 self.motor_dataframe = None
