@@ -256,6 +256,11 @@ class HelpersMixin:
                 ("Engine torque-RPM", have("engine_dataframe"), True),
                 ("Gear efficiency", bool(getattr(self, "engine_efficiency_curves", None)), False),
             ],
+            "MTPA / MTPV (PMSM)": [
+                ("Ld map", have("mtpa_ld_map"), False),
+                ("Lq map", have("mtpa_lq_map"), False),
+                ("ψ_PM map", have("mtpa_psi_map"), False),
+            ],
         }.get(analysis_type, [])
 
         if not needs:

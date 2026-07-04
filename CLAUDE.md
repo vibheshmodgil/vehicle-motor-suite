@@ -55,8 +55,9 @@ Versions in `requirements.txt` are pinned to the tested set (done 2026-07).
 ### Sample test data
 `python generate_sample_data.py` writes ready-to-load dummy Excel files into
 `sample_data/` — one per upload slot (drive cycle, motor data, engine torque/RPM,
-gear efficiency G1..G6, two efficiency maps). They match the exact formats the
-loaders expect; use them to exercise every analysis without real data.
+gear efficiency G1..G6, two efficiency maps, three MTPA/MTPV d-q saturation maps
+`mtpa_{ld,lq,psi}_map.xlsx`). They match the exact formats the loaders expect;
+use them to exercise every analysis without real data.
 
 ### Optional assets (app starts fine without them)
 Place next to `main.py`:
@@ -100,6 +101,41 @@ color. All four map views (including the Controller map) mask against the
 can't drive the shaft past what the motor itself can reach. If Motor Input
 Parameters aren't filled in yet, `_motor_capability_mask()` returns `None` and
 the map shows unmasked (no behavior change until those fields are populated).
+Three related contracts (2026-07):
+- **Uploaded NaN cells stay NaN.** `_normalize_efficiency_map_data` no longer
+  back-fills blank cells with the median — datasheet maps leave the region
+  above the torque-speed curve empty, and filling it painted "valid"
+  efficiency there. Downstream interpolation already substitutes the constant
+  default for NaN results.
+- **Autofill respects map holes.** `_autofill_motor_params_from_map` takes the
+  eff matrix; when it contains NaN holes, Max Power = max |T|·ω over the
+  *populated* cells (≈ the real corner power) and Max Torque = max |T| with
+  data. Fully populated maps keep the old full-rectangle values exactly.
+- **The envelope is always drawn.** `_draw_motor_capability_curve()` overlays
+  the Motor-1 mask boundary (flat peak torque to base RPM = P/T, then P/ω) on
+  all five map views so the user can visually confirm nothing is colored above
+  it. Locked by tests/test_eff_map_nan.py alongside test_capability_mask.py.
+- **Grid lines render above the colormap.** `setup_plot_style()`'s
+  `seaborn-v0_8-whitegrid` base style sets `axes.axisbelow=True` globally,
+  which puts gridlines below *every* artist including filled contours/hexbins
+  -- invisible under a map's fill. `apply_graph_style()` now calls
+  `ax.set_axisbelow('line')` (matplotlib's real default: above patches, below
+  plotted lines) before drawing the grid; `_plot_range_efficiency_map_panel`
+  sets it directly since Range has no Graph Settings panel to route through.
+- **Extrapolate-to-envelope toggle (Drive Cycle Efficiency only).** A
+  datasheet map's own blank cells mostly line up with the capability mask's
+  rejection region already, but `contourf` kills an ENTIRE grid quad the
+  moment any one of its four corners is NaN -- so a handful of rejected nodes
+  right next to the curve can visually erase a much bigger swath of already-
+  valid, accepted cells than the mask itself rejects. The
+  `extrapolate_gaps` Graph Settings toggle (off by default): (1)
+  `_extrapolate_eff_gaps()` nearest-neighbor-fills NaN cells on the map's own
+  axis, then (2) `_dense_regrid_eff()` bilinearly resamples onto a dense
+  200x200 grid -- the same fine-grid technique Combined/Difference already use
+  unconditionally -- before the capability mask (which always still wins) is
+  applied. Wired into Motor 1/2; Combined/Difference get the native-grid
+  extrapolation step only, since they already interpolate onto a dense common
+  grid regardless of the toggle.
 
 ### Drive Cycle Efficiency (Motor × Controller)
 `efficiency.py` computes drive-cycle efficiency two ways via
@@ -111,9 +147,29 @@ Range `regen_cap_w` field. `_drive_cycle_operating_points()` is the shared
 force-model helper (same equations as `range_analysis.py`) used by both the
 metrics and the map overlay so they never diverge. Views: `plot_efficiency_map_motor1`
 (Motor), `_motor2` (Controller), `plot_efficiency_map_combined`,
-`plot_efficiency_difference_map` (Controller−Motor). The drive-cycle overlay
+`plot_efficiency_difference_map` (Controller−Motor), `plot_efficiency_map_regen`
+(Regen/braking, Motor only). The drive-cycle overlay
 (`_overlay_drive_cycle_on_efficiency_plot`) supports Scatter / Heatmap / Both via
 the `overlay_*` Graph-Settings keys (hexbin weighted by point count or tractive Wh).
+- **Regen (Braking) Efficiency Map** (2026-07): no datasheet map measures
+  regen efficiency separately, and the app already *assumed* motoring
+  efficiency applies to braking too (`_interpolate_efficiency_or_constant`
+  looks maps up via `np.abs(torque)`, and `_motor_capability_mask` is
+  symmetric in torque) — but nothing ever showed that assumption visually.
+  `plot_efficiency_map_regen` mirrors the Motor 1 map about T=0 (negating the
+  torque axis and reversing the matrix rows, dropping a duplicate T=0 row if
+  present) and plots only the resulting T≤0 half, with the capability mask
+  and `_draw_motor_capability_curve`'s existing negative-torque mirroring
+  applied the same as every other map. Because `contourf`'s mesh still spans
+  the (all-NaN) positive half, the view explicitly clips `ax.set_ylim` to the
+  negative range afterward — otherwise half the plot would be blank space.
+  `_overlay_drive_cycle_on_efficiency_plot` gained a `regen=False` parameter;
+  `regen=True` overlays braking points (`motor_torque < 0`) instead of
+  motoring ones. Shares the "Drive Cycle Efficiency" Graph Settings namespace
+  with the other four map views (same cmap/levels/extrapolate/overlay
+  controls — no separate schema entry needed, since none of these views are
+  behind a sub-mode selector the way Compare Standard Motor Data's four
+  radios are). Wired into the report generator right after the Motor map.
 
 ### Platform
 Developed on **Windows 11**. `theme.apply_appearance()` calls
@@ -180,11 +236,11 @@ vmi/app.py
 | `engine.py` | `EngineMixin` | IC-engine multi-gear analysis, gear-efficiency interpolation, sync engine curve into motor inputs. |
 | `efficiency.py` | `EfficiencyMixin` | Efficiency-map reading/normalizing/interpolation, Motor 1/2 maps, difference map, drive-cycle overlay. |
 | `range_analysis.py` | `RangeAnalysisMixin` | `plot_power_energy_cycle()` — the full battery/range model and its multi-panel plot. |
-| `mtpa_mtpv.py` | `MtpaMtpvMixin` + `solve_mtpa_mtpv()` | "MTPA / MTPV (PMSM)" analysis: pure d-q solver (module function, tested in tests/test_mtpa_mtpv.py) + input section + 4 plot views. Short-circuits in `dispatch.plot_graph` before vehicle-input parsing (like Range). Model per `knowledge_base/scenarios/MTPA_MTPV.pdf`; stator resistance neglected. Region classification is geometric (MTPV = optimum detached from the current circle), not torque-comparison. |
-| `compare_std.py` | `CompareStdMixin` | Standard-motor comparison table + overlay plotting. |
+| `mtpa_mtpv.py` | `MtpaMtpvMixin` + `solve_mtpa_mtpv()` | "MTPA / MTPV (PMSM)" analysis: pure d-q solver (module function, tested in tests/test_mtpa_mtpv.py) + input section + 4 plot views. Short-circuits in `dispatch.plot_graph` before vehicle-input parsing (like Range). Model per `knowledge_base/scenarios/MTPA_MTPV.pdf`; stator resistance neglected. Region classification is geometric (MTPV = optimum detached from the current circle), not torque-comparison. Current spec: `phase_peak_current()` converts Line/Phase × RMS/Peak × Star/Delta to the solver's peak phase current; `dc_link_to_vmax()` maps Vdc through the selected PWM scheme (SVPWM Vdc/√3 default, sine Vdc/2, six-step 2Vdc/π). Base speed is analytic (Vmax/(p·\|ψ_MTPA\|)), not the last feasible speed-grid sample. Optional Ld/Lq/ψ_PM saturation maps over an (id×iq) Excel grid (`mtpa_{ld,lq,psi}_map` dicts `{'id','iq','m'}`, mH/mH/Wb, auto-detects H; \|id\| axes accepted) switch the solver to a dense-grid + circle-boundary search; missing maps fall back to the constant entries, no maps = original path (golden-locked). Maps persist via `_dataset_slots()` and show in the data checklist. Graph Settings are applied per panel by `_mtpa_apply_gs` (the "All" view has 4 axes; `apply_graph_style` only handles one). |
+| `compare_std.py` | `CompareStdMixin` | Standard-motor comparison table + overlay plotting (torque/force/acceleration/efficiency — see §7e). |
 | `data_io.py` | `DataIOMixin` | All Excel/JSON load/save + the column-picker popups + delete handlers. |
 | `downloads.py` | `DownloadsMixin` | Save current figure / export torque-speed data to Excel. |
-| `enhancements.py` | `EnhancementsMixin` | Cross-cutting *new* features: toolbar, status bar, figure/data export, HTML report, save/load scenario, dark-plot toggle, Enter-to-plot, `_safe_plot` error wrapper, loss waterfall. |
+| `enhancements.py` | `EnhancementsMixin` | Cross-cutting *new* features: toolbar, status bar, figure/data export, multi-analysis HTML report, save/load scenario, dark-plot toggle, Enter-to-plot, `_safe_plot` error wrapper, loss waterfall. |
 | `graph_settings.py` | `GraphSettingsMixin` | Per-analysis "Graph Settings" panel (line colors/styles/widths, grid/legend/title sizes, colormap, contour levels). Schema-driven; values in `self._gs_values`; read in plot code via `self.gs_*()`. |
 | `assistant.py` | `AssistantMixin` | Collapsible chat sidebar (local LLM + RAG). See §7c. |
 | `llm_client.py` | (module) | Thin `requests` wrapper around a local Ollama server (`chat()`, `embed()`). |
@@ -406,7 +462,10 @@ applies grid/legend/title/label-size to `self.ax` and is called at the end of
 - **Wired:** Torque/Force/Acceleration (per-line color/style/width + universal),
   Efficiency maps M1/M2 (colormap + fill/line contour levels), difference map
   (levels), Parametric (colormap + fill/line contour levels + universal), Engine
-  (universal), Drive Cycle (universal + heatmap colormap/weight/opacity/top-N).
+  (universal), Drive Cycle (universal + heatmap colormap/weight/opacity/top-N),
+  MTPA/MTPV (per-line envelope/power/id/iq/|i_s|, region shading on/off +
+  opacity, trajectory marker size, grid/legend/fonts — applied per panel by
+  `_mtpa_apply_gs`, since the "All" view is multi-axis).
 - The universal grid block also exposes **per-axis fixed tick spacing**
   (`grid_x_step` / `grid_y_step`, 0 = auto) applied via `MultipleLocator` in
   `apply_graph_style` (capped at ~1000 ticks). Torque/Force/Acceleration no
@@ -414,8 +473,44 @@ applies grid/legend/title/label-size to `self.ax` and is called at the end of
   called both at the end of `plot_graph` and inside `plot_force_graph` /
   `plot_vehicle_max_speed_vs_time`.
 - **Not yet wired:** Range analysis (multi-panel — `apply_graph_style` only
-  touches one axis) and Compare Standard Motor Data (separate plot path). These
-  intentionally have no `graph_settings` entry.
+  touches one axis). It intentionally has no `graph_settings` entry.
+- **Compare Standard Motor Data** (2026-07) has its own vehicle/motor/sim/env
+  inputs and a `graph_settings` entry, added because that analysis previously
+  showed only the `compare_std` section — the user had no way to edit mass,
+  gear ratio, peak torque, axis limits, etc. while comparing, and had to switch
+  to another analysis type to change them. `analysis_sections["Compare
+  Standard Motor Data"]` is now `['compare_std', 'vehicle', 'dynamics',
+  'motor', 'sim', 'env', 'graph_settings']` (plus the usual auto-injected
+  `efficiency_data`, needed for the "Compare Efficiency Map" mode). Because the
+  four Compare radio buttons (Torque/Force/Acceleration/Efficiency) pick
+  fundamentally different plots with different relevant axis fields, all four
+  now call `update_plot()` (was `update_compare_std_plot()` directly) so
+  `show_sections_for_analysis`'s `Compare Standard Motor Data` branch inside
+  the `key == 'sim'` block (`dispatch.py`) can re-show only the matching
+  fields: Torque → km/h X-limit + both Nm Y-limits (motor/wheel); Force → X
+  + wheel-N Y-limit; Acceleration → max time + target speed; Efficiency →
+  none (the diff map's color range is data-driven). `torque_compare_mode`
+  (Wheel/Motor) also gained `command=self.update_plot` for the same reason —
+  it previously did nothing until the pinned Update Plot button was pressed.
+  `_gs_analysis()` splits Compare's graph settings into four namespaces the
+  same way it splits Powertrain Sizing by Output (`"Compare Standard Motor
+  Data::Torque/Force/Acceleration/Efficiency"`), keyed off
+  `compare_std_plot_var`. Torque/Force/Acceleration get a shared `line_width`
+  (impractical to expose per-line color pickers since the motor count is
+  dynamic) + the universal grid/legend/font block; Efficiency gets the diff
+  map's colormap/contour-level controls, mirroring Drive Cycle Efficiency's
+  Difference map. `update_compare_std_plot()` and
+  `_plot_compare_std_efficiency_map()` now end by calling
+  `apply_graph_style()` instead of a hardcoded `ax.legend()`/`ax.grid(True)`.
+  Two correctness bugs were fixed alongside this: (1) the x-axis speed unit
+  passed to `get_x_limits` is now hardcoded to `"Km/hr"` instead of read from
+  the (hidden-in-this-analysis) `speed_unit_combo`, which could be left on
+  "RPM" from a different analysis and return an RPM-scaled limit pair against
+  the km/h-valued `speeds` array Compare always plots; (2) the torque
+  comparison's y-limit read/write now picks the `ylim_wheel`/`ylim_wheel_manual`
+  entry when `torque_compare_mode == "Wheel"` and `ylim`/`ylim_manual` when
+  `"Motor"`, instead of always using the motor-labeled field regardless of
+  mode.
 
 **Intersection-based x-cap.** In Torque/Force, `_auto_cap_xlimits` trims the
 x-axis to `1.1 ×` the furthest peak-curve/resistive intersection (dead space past
@@ -452,6 +547,117 @@ introduces `threading.Thread` for LLM calls / index rebuilds, with a
 results back to the main thread. Don't touch any Tk widget from inside
 `_chat_worker` / the rebuild `worker()` — push onto `self._assistant_queue`
 instead, exactly like the existing "chat_reply"/"kb_done"/etc. message types.
+
+## 7d. Multi-analysis HTML report
+
+The toolbar "Report" button (`generate_report` in `enhancements.py`) opens a
+checklist popup (`_open_report_picker`) listing every key in
+`self.analysis_sections` (a new analysis mode is automatically offered —
+nothing to wire here), defaulting to just the analysis currently active; the
+user can select any subset or "Select All".
+
+**One report section per plot, not per analysis.** `_render_report_views(
+analysis)` is the per-analysis dispatcher — explicit branches on purpose (not
+a generic loop), because each analysis's "views" are controlled by completely
+different widgets:
+- **Powertrain Sizing**: Torque (At Wheel) always; Torque (At Motor) too, but
+  *only* when the gear ratio isn't 1:1 (wheel and motor numbers are otherwise
+  identical, so a second view would be a duplicate); Force (always wheel-only
+  — the Plotting Part selector auto-locks to wheel for Force, so there's no
+  motor-side Force to show).
+- **Drive Cycle**: Speed-vs-Time, Torque-Speed Scatter, and — only if a drive
+  cycle is loaded — Torque-Speed Heatmap (toggles `self.heatmap_var` around
+  the same `plot_torque_speed_drive_cycle(show_popup=False)` call the "Plot
+  Torque-Speed Heatmap" button uses; `show_popup=False` is required here, the
+  button's own `show_popup=True` would pop a blocking modal during report
+  generation).
+- **Drive Cycle Efficiency**: Motor / Controller / Combined / Difference maps
+  — called *directly* (`plot_efficiency_map_motor1/2`,
+  `_combined`, `plot_efficiency_difference_map`), never through
+  `update_plot()`. This analysis has **no branch in `dispatch.plot_graph`
+  at all** (it's purely button-driven in the UI), so routing it through the
+  generic `update_plot()` path — as the report used to — silently produces
+  the "Insert Data or Update Plot" placeholder instead of a real map. Only
+  the maps that are actually loaded are included.
+- **Compare Standard Motor Data**: Torque / Force / Acceleration always (if
+  at least one motor is selected); Efficiency Map too, if the current session
+  has a Motor map loaded *and* the selected motor(s) include a saved one
+  (see §7e).
+- **Everything else** (Acceleration, Parametric Study, Engine analysis, Range
+  analysis, MTPA/MTPV): one view via plain `update_plot()`. Range and MTPA
+  already default to their "All" multi-panel dashboard, so one view is
+  already comprehensive for those.
+
+**Inputs come first.** `_report_core_inputs_html()` builds one table of the
+shared vehicle/motor inputs (mass, Crr/CdA, gear ratio, wheel radius, peak
+torque/power, gradients, ...) — read once and shown at the very top of the
+report (`id="inputs"`, before the table of contents), not repeated per
+section. `_report_analysis_inputs_html(analysis)` adds a second, small inputs
+block for analyses with their own separate input model that the shared table
+doesn't cover (currently just MTPA/MTPV's d-q parameters); it's prepended to
+that analysis's *first* section only.
+
+Per-view numeric summaries still come from `_REPORT_LABEL_ATTRS[analysis]`
+(the relevant `*_results_label` / `params_label` widget(s); Range analysis
+also gets its `_last_range_metrics` table, Compare Standard Motor Data gets
+its selected-motors table) — the same summary is repeated under each of that
+analysis's views, since the label reflects whatever was last computed for the
+analysis as a whole, not one specific view.
+
+Every widget the report touches to switch views (`plot_type`, `output_combo`,
+`plot_part_combo`, `heatmap_var`, `compare_std_plot_var`) is snapshotted
+before generation and restored in a `finally` block afterward, so the app
+ends up back exactly where the user left it, regardless of the checklist.
+
+**If you add a new analysis mode:** add its result-label attribute(s) to
+`_REPORT_LABEL_ATTRS` (skip it if the mode has no numeric summary — the
+report falls back to "no numeric summary for this view" and still includes
+the figure). **If the new mode has more than one meaningful view** (its own
+"which map/part/side" toggle), add a branch to `_render_report_views` — the
+`else` fallback only ever captures one.
+
+## 7e. Compare Standard Motor Data: saved efficiency maps + decluttered torque compare
+
+Saving a motor (`save_std_motor_data_popup` in `data_io.py`) now also snapshots
+whatever Motor efficiency map is currently loaded (`self.eff1_map_torques/
+_rpms/_matrix`) via `_current_eff_map_for_save()`, storing it as an `eff_map`
+key (`{"torque_axis", "rpm_axis", "matrix"}`, plain lists) alongside the usual
+`speed_rpm`/`torque`/`gear_ratio_std`/`wheel_radius` in
+`std_motor_data_sample.json`. A motor saved with no map loaded simply has no
+`eff_map` key (`None` via `.get("eff_map")`), same as motors saved before this
+existed — nothing breaks reading old entries. `choose_std_motor_popup` carries
+that key straight through into `self.selected_std_motors` entries (now
+`{name, gear_ratio, wheel_radius, eff_map}` — if you add a new attribute to
+these entries, update the comment next to `self.selected_std_motors = []` in
+`app.py`).
+
+A 4th radio button, **"Compare Efficiency Map"** (`compare_std_plot_var` value
+`"efficiency"`), dispatches `update_compare_std_plot` to
+`_plot_compare_std_efficiency_map()` before any of the vehicle/torque inputs
+are parsed (that parsing is irrelevant here and shouldn't be able to block the
+view on an unrelated blank field). It diffs the *currently loaded* Motor map
+against the *first* selected standard motor that has a saved `eff_map`
+(mirrors the pre-existing "first selected motor" fallback in
+`save_std_motor_data_popup`) — same diverging-colormap technique as
+`plot_efficiency_difference_map` (Drive Cycle Efficiency): interpolate both
+onto a common fine grid, `saved − current`, `_motor_capability_mask()` +
+`_draw_motor_capability_curve()` for masking/envelope, `ax.set_axisbelow
+('line')` so the grid renders above the fill. Missing map on either side, or
+no overlapping torque/RPM region, shows a placeholder message instead of
+erroring.
+
+**Compare Torque Plot decluttering.** `plot_torque_graph()` gained a
+`show_continuous` parameter (default `True`); Compare Standard Motor Data
+passes `show_continuous=False`, which drops the continuous/"rated" torque
+curve and its gradient-intersection markers entirely for the *current*
+motor — comparing several motors' rated torque added clutter with no real
+use, the comparison is about peak capability. Each *saved* motor's own peak
+curve now gets its own gradient-intersection markers too (previously only the
+current motor did): `update_compare_std_plot` recomputes the per-gradient
+resistive-torque array (same formula `plot_torque_graph` uses internally, not
+exposed by that call) and calls `_annotate_intersections()` with the plotted
+line's own color and a diamond marker, so each motor's crossing point is
+visually tied to its curve.
 
 ## 8. Known rough edges (be aware, fix only if asked)
 

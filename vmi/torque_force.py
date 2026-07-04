@@ -110,9 +110,16 @@ class TorqueForceMixin:
         speed_unit,
         overlay_std=True,
         show_main_label=True,
+        show_continuous=True,
         peak_to_rated_torque_ratio=2.0,
     ):
-        """Plots torque vs speed with peak and continuous curves and intersection annotations."""
+        """Plots torque vs speed with peak and continuous curves and intersection annotations.
+
+        `show_continuous=False` (used by the Compare Standard Motor Data view)
+        drops the continuous/"rated" torque curve and its gradient-intersection
+        markers entirely -- comparing several motors' *rated* torque adds
+        clutter with little value, so that view only cares about peak torque.
+        """
         if overlay_std:
             self.ax.clear()
         if hasattr(self, "heatmap_colorbar") and self.heatmap_colorbar is not None:
@@ -211,14 +218,17 @@ class TorqueForceMixin:
                     y_resist = df_motor[f"motor_resistive_torque_{gradient}"]
                     self.ax.plot(x, y_resist, label=f"Gradient {gradient}%", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
                     peak_int_x += [p[0] for p in self._annotate_intersections(x, y, y_resist, x_label, "Nm", "red")]
-                    self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
+                    if show_continuous:
+                        self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
 
                 if show_main_label:
                     self.ax.plot(x, y, color=peak_c, linestyle=peak_ls, linewidth=peak_lw, label=peak_curve_name)
-                    self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw, label=cont_curve_name)
+                    if show_continuous:
+                        self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw, label=cont_curve_name)
                 else:
                     self.ax.plot(x, y, color=peak_c, linestyle=peak_ls, linewidth=peak_lw)
-                    self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw)
+                    if show_continuous:
+                        self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw)
             else:
                 if speed_unit == "RPM":
                     x = speeds_rpm_wheel
@@ -240,14 +250,17 @@ class TorqueForceMixin:
                     y_resist = df_motor[f"wheel_resistive_torque_{gradient}"]
                     self.ax.plot(x, y_resist, label=f"Gradient {gradient}%", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
                     peak_int_x += [p[0] for p in self._annotate_intersections(x, y, y_resist, x_label, "Nm", "red")]
-                    self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
+                    if show_continuous:
+                        self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
 
                 if show_main_label:
                     self.ax.plot(x, y, color=peak_c, linestyle=peak_ls, linewidth=peak_lw, label=peak_curve_name)
-                    self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw, label=cont_curve_name)
+                    if show_continuous:
+                        self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw, label=cont_curve_name)
                 else:
                     self.ax.plot(x, y, color=peak_c, linestyle=peak_ls, linewidth=peak_lw)
-                    self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw)
+                    if show_continuous:
+                        self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw)
         else:
             if plot_part == "At Motor":
                 if speed_unit == "RPM":
@@ -266,14 +279,17 @@ class TorqueForceMixin:
                     y_resist = df_motor[f"motor_resistive_torque_{gradient}"]
                     self.ax.plot(x, y_resist, label=f"Motor Resistive Torque (Gradient {gradient}%)", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
                     peak_int_x += [p[0] for p in self._annotate_intersections(x, y, y_resist, x_label, "Nm", "red")]
-                    self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
+                    if show_continuous:
+                        self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
 
                 if show_main_label:
                     self.ax.plot(x, y, color=peak_c, linestyle=peak_ls, linewidth=peak_lw, label=peak_curve_name)
-                    self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw, label=cont_curve_name)
+                    if show_continuous:
+                        self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw, label=cont_curve_name)
                 else:
                     self.ax.plot(x, y, color=peak_c, linestyle=peak_ls, linewidth=peak_lw)
-                    self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw)
+                    if show_continuous:
+                        self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw)
             else:
                 if speed_unit == "RPM":
                     x = df_motor["speeds_rpm_wheel"]
@@ -291,14 +307,17 @@ class TorqueForceMixin:
                     y_resist = df_motor[f"wheel_resistive_torque_{gradient}"]
                     self.ax.plot(x, y_resist, label=f"Gradient {gradient}%", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
                     peak_int_x += [p[0] for p in self._annotate_intersections(x, y, y_resist, x_label, "Nm", "red")]
-                    self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
+                    if show_continuous:
+                        self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
 
                 if show_main_label:
                     self.ax.plot(x, y, color=peak_c, linestyle=peak_ls, linewidth=peak_lw, label=peak_curve_name)
-                    self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw, label=cont_curve_name)
+                    if show_continuous:
+                        self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw, label=cont_curve_name)
                 else:
                     self.ax.plot(x, y, color=peak_c, linestyle=peak_ls, linewidth=peak_lw)
-                    self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw)
+                    if show_continuous:
+                        self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw)
 
         # Trim the dead space past the last useful intersection (auto mode only).
         if speed_unit == "RPM":

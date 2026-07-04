@@ -12,6 +12,8 @@ from vmi.mtpa_mtpv import (
     REGION_FW,
     REGION_MTPA,
     REGION_MTPV,
+    dc_link_to_vmax,
+    phase_peak_current,
     solve_mtpa_mtpv,
 )
 
@@ -94,3 +96,124 @@ class TestValidation:
         bad["psi_pm"] = 0.0
         with pytest.raises(ValueError):
             solve_mtpa_mtpv(**bad)
+
+
+class TestCurrentSpec:
+    """Line/phase + RMS/peak -> peak phase current (star vs delta)."""
+
+    def test_star_line_equals_phase(self):
+        assert phase_peak_current(100, "Star (Y)", "Line", "Peak") == pytest.approx(100.0)
+
+    def test_delta_line_to_phase(self):
+        assert phase_peak_current(100, "Delta (Δ)", "Line", "Peak") == \
+            pytest.approx(100.0 / np.sqrt(3.0))
+
+    def test_delta_phase_unchanged(self):
+        assert phase_peak_current(100, "Delta (Δ)", "Phase", "Peak") == pytest.approx(100.0)
+
+    def test_rms_to_peak(self):
+        assert phase_peak_current(100, "Star (Y)", "Phase", "RMS") == \
+            pytest.approx(100.0 * np.sqrt(2.0))
+
+    def test_delta_line_rms(self):
+        assert phase_peak_current(100, "Delta (Δ)", "Line", "RMS") == \
+            pytest.approx(100.0 * np.sqrt(2.0) / np.sqrt(3.0))
+
+
+class TestVoltageLimit:
+    def test_svpwm_default(self):
+        assert dc_link_to_vmax(72.0) == pytest.approx(72.0 / np.sqrt(3.0))
+
+    def test_sine_pwm(self):
+        assert dc_link_to_vmax(72.0, "Sine PWM (Vdc/2)") == pytest.approx(36.0)
+
+    def test_six_step(self):
+        assert dc_link_to_vmax(72.0, "Six-step (2·Vdc/π)") == pytest.approx(2 * 72.0 / np.pi)
+
+    def test_six_step_raises_base_speed(self):
+        lo = solve_mtpa_mtpv(**IPM)
+        hi = solve_mtpa_mtpv(**{**IPM, "v_max": 2 * 72.0 / np.pi})
+        # Same MTPA point, more voltage headroom -> proportionally higher base.
+        assert hi["base_rpm"] / lo["base_rpm"] == \
+            pytest.approx((2 / np.pi) / (1 / np.sqrt(3.0)), rel=1e-6)
+        assert hi["t_mtpa_max"] == pytest.approx(lo["t_mtpa_max"])
+
+
+class TestBaseSpeedAnalytic:
+    def test_spmsm_base_speed_closed_form(self):
+        """SPMSM: MTPA is id=0, so base w_e = Vmax / hypot(psi, Lq*Imax)."""
+        p, lq, psi, imax, vmax = 4, 0.2e-3, 0.02, 100.0, 40.0
+        sol = solve_mtpa_mtpv(pole_pairs=p, ld_h=0.2e-3, lq_h=lq, psi_pm=psi,
+                              i_max=imax, v_max=vmax, rpm_max=6000.0)
+        w_e = vmax / np.hypot(psi, lq * imax)
+        expected = w_e / p * 60.0 / (2 * np.pi)
+        assert sol["base_rpm"] == pytest.approx(expected, rel=2e-3)
+
+    def test_base_speed_matches_region_boundary(self):
+        """Analytic base speed sits at the end of the MTPA-classified region."""
+        sol = solve_mtpa_mtpv(**IPM)
+        m = sol["region"] == REGION_MTPA
+        last_mtpa = sol["rpm"][m][-1]
+        step = sol["rpm"][1] - sol["rpm"][0]
+        assert last_mtpa <= sol["base_rpm"] + 1e-9
+        assert sol["base_rpm"] - last_mtpa <= step * 1.5
+
+
+class TestSaturationMaps:
+    @staticmethod
+    def _const_map(value, i_max=200.0, n=5):
+        ax = np.linspace(-i_max, i_max, n)
+        return {"id": ax, "iq": ax, "m": np.full((n, n), value)}
+
+    def test_constant_maps_match_constant_solver(self):
+        """Uniform maps must reproduce the analytic constant-parameter path
+        (grid search vs boundary sampling -> small tolerance)."""
+        ref = solve_mtpa_mtpv(**IPM)
+        mapped = solve_mtpa_mtpv(
+            **IPM,
+            ld_map=self._const_map(IPM["ld_h"]),
+            lq_map=self._const_map(IPM["lq_h"]),
+            psi_map=self._const_map(IPM["psi_pm"]),
+        )
+        assert mapped["mapped"] and not ref["mapped"]
+        assert mapped["t_mtpa_max"] == pytest.approx(ref["t_mtpa_max"], rel=1e-3)
+        assert mapped["base_rpm"] == pytest.approx(ref["base_rpm"], rel=1e-2)
+        assert mapped["corner_kw"] == pytest.approx(ref["corner_kw"], rel=2e-2)
+        assert np.allclose(mapped["torque"], ref["torque"],
+                           rtol=2e-2, atol=ref["t_mtpa_max"] * 1e-2)
+        assert mapped["i_ch"] == pytest.approx(ref["i_ch"], rel=1e-6)
+
+    def test_saturating_lq_reduces_reluctance_torque(self):
+        """An Lq that saturates toward Ld kills reluctance torque -> lower peak."""
+        ref = solve_mtpa_mtpv(**IPM)
+        n = 9
+        ax = np.linspace(-200.0, 200.0, n)
+        _, IQ = np.meshgrid(ax, ax, indexing="ij")
+        lq_sat = IPM["lq_h"] * (1.0 - 0.5 * np.abs(IQ) / 200.0)
+        sat = solve_mtpa_mtpv(**IPM, lq_map={"id": ax, "iq": ax, "m": lq_sat})
+        assert sat["t_mtpa_max"] < ref["t_mtpa_max"]
+        # Still respects the current limit.
+        ok = np.isfinite(sat["id"])
+        assert np.all(sat["id"][ok] ** 2 + sat["iq"][ok] ** 2
+                      <= 200.0 ** 2 * (1 + 1e-6))
+
+    def test_mapped_operating_points_respect_voltage_limit(self):
+        sol = solve_mtpa_mtpv(
+            **IPM,
+            lq_map=self._const_map(IPM["lq_h"]),
+        )
+        prm = sol["params"]
+        ok = np.isfinite(sol["id"])
+        idv, iqv = sol["id"][ok], sol["iq"][ok]
+        w_e = prm["p"] * sol["rpm"][ok] * 2 * np.pi / 60.0
+        flux = np.hypot(prm["Ld"] * idv + prm["psi"], prm["Lq"] * iqv)
+        assert np.all(flux <= prm["Vmax"] / w_e + 1e-9)
+
+    def test_abs_id_axis_map_supported(self):
+        """A map given over |id| >= 0 is interpreted as magnitude."""
+        n = 5
+        pos = np.linspace(0.0, 200.0, n)
+        ld = {"id": pos, "iq": pos, "m": np.full((n, n), IPM["ld_h"])}
+        ref = solve_mtpa_mtpv(**IPM)
+        sol = solve_mtpa_mtpv(**IPM, ld_map=ld)
+        assert sol["t_mtpa_max"] == pytest.approx(ref["t_mtpa_max"], rel=1e-3)

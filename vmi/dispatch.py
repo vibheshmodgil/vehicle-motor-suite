@@ -300,7 +300,25 @@ class DispatchMixin:
                     self.target_speed_frame.pack(fill="x", pady=8, padx=16)
                     self.update_button.pack_forget()
                     self.params_label.pack_forget()
-                
+                elif analysis_type == "Compare Standard Motor Data":
+                    # Which axis-limit / simulation fields are relevant depends on
+                    # which of the four Compare radio buttons is selected. The
+                    # x-axis is always plotted in km/h here (see update_compare_std_plot),
+                    # so only the km/h X-limit field applies -- no RPM variants.
+                    plot_kind = self.compare_std_plot_var.get() if hasattr(self, "compare_std_plot_var") else "torque"
+                    if plot_kind == "torque":
+                        self.xlim_frame.pack(fill="x", pady=8, padx=16)
+                        self.ylim_frame.pack(fill="x", pady=8, padx=16)
+                        self.ylim_wheel_frame.pack(fill="x", pady=8, padx=16)
+                    elif plot_kind == "force":
+                        self.xlim_frame.pack(fill="x", pady=8, padx=16)
+                        self.ylim_wheel_force_frame.pack(fill="x", pady=8, padx=16)
+                    elif plot_kind == "acceleration":
+                        self.max_time_frame.pack(fill="x", pady=8, padx=16)
+                        self.target_speed_frame.pack(fill="x", pady=8, padx=16)
+                    # "efficiency": the map's color range is data-driven -- no
+                    # axis-limit fields apply, so none are shown.
+
             # Keep the Crr/CdA info label at the bottom of the section list.
             # (The in-scroll Update button is gone; the pinned top button is
             # the single Update action.)

@@ -116,10 +116,40 @@ SCHEMA = {
         _f("hm_top_pct", "float", "Highlight top % (count/energy)", 70),
         _f("hm_show_top", "bool", "Show top-bins table", True),
     ] + _UNIVERSAL_LINE,
+    # MTPA/MTPV draws up to four panels; grid/legend/font settings are applied
+    # per-panel by _mtpa_apply_gs (apply_graph_style only touches self.ax).
+    # Defaults mirror the original hard-coded look (title 13, grid alpha 0.5).
+    "MTPA / MTPV (PMSM)":
+        _line("env", "Torque envelope", "black", "solid", "2.2")
+        + _line("power", "Power curve", "Auto", "solid", "2.2")
+        + _line("id", "id curve", "Auto", "solid", "2.0")
+        + _line("iq", "iq curve", "Auto", "solid", "2.0")
+        + _line("is", "|i_s| curve", "gray", "dashed", "1.5")
+        + [
+            _f("region_shade", "bool", "Shade MTPA/FW/MTPV regions", True),
+            _f("region_alpha", "float", "Region shade opacity", 0.10),
+            _f("traj_size", "int", "Trajectory marker size", 4),
+            _f("grid_x", "bool", "Grid: vertical (X) lines", True),
+            _f("grid_y", "bool", "Grid: horizontal (Y) lines", True),
+            _f("grid_x_step", "float", "Grid X spacing (0=auto)", 0),
+            _f("grid_y_step", "float", "Grid Y spacing (0=auto)", 0),
+            _f("grid_style", "style", "Grid line style", "dashed", STYLE_CHOICES),
+            _f("grid_alpha", "choice", "Grid opacity", "0.5",
+               ["0.2", "0.4", "0.5", "0.6", "0.7", "0.8", "1.0"]),
+            _f("show_legend", "bool", "Show legend", True),
+            _f("legend_loc", "choice", "Legend position", "Auto", ["Auto"] + LEGEND_CHOICES),
+            _f("title_size", "int", "Title font size", 13),
+            _f("label_size", "int", "Axis label size", 11),
+        ],
     "Drive Cycle Efficiency": [
         _f("cmap", "choice", "Colormap", "viridis", CMAP_CHOICES),
         _f("fill_levels", "int", "Filled contour levels", 50),
         _f("line_levels", "int", "Contour lines", 20),
+        # Off by default: fills data gaps *inside* the motor's capability
+        # envelope with the nearest known map value, purely cosmetic (the
+        # capability mask still blanks everything outside the envelope
+        # regardless of this toggle -- see _extrapolate_eff_gaps).
+        _f("extrapolate_gaps", "bool", "Extrapolate to envelope (fill data gaps)", False),
         # Drive-cycle points overlay (shown when 'Show Drive Cycle Data' is on).
         _f("overlay_style", "choice", "Overlay style", "Scatter", ["Scatter", "Heatmap", "Both"]),
         _f("overlay_weight", "choice", "Overlay heatmap weight", "Point Count", ["Point Count", "Energy (Wh)"]),
@@ -129,6 +159,26 @@ SCHEMA = {
     ] + _GRID_FIELDS + [
         _f("title_size", "int", "Title font size", 24),
         _f("label_size", "int", "Axis label size", 18),
+    ],
+    # Compare Standard Motor Data draws a variable number of lines (one per
+    # selected motor), so per-line color pickers aren't practical -- a shared
+    # line width plus the universal grid/legend/font controls is enough to
+    # match the level of control the other line-plot analyses get. Kept as
+    # four separate namespaces (one per radio button) so e.g. widening the
+    # torque comparison's lines doesn't also widen the acceleration plot's.
+    "Compare Standard Motor Data::Torque":
+        [_f("line_width", "width", "Line width", "2.0", WIDTH_CHOICES)] + _UNIVERSAL_LINE,
+    "Compare Standard Motor Data::Force":
+        [_f("line_width", "width", "Line width", "2.0", WIDTH_CHOICES)] + _UNIVERSAL_LINE,
+    "Compare Standard Motor Data::Acceleration":
+        [_f("line_width", "width", "Line width", "2.0", WIDTH_CHOICES)] + _UNIVERSAL_LINE,
+    "Compare Standard Motor Data::Efficiency": [
+        _f("cmap", "choice", "Diff colormap", "RdBu", ["RdBu", "RdYlBu", "coolwarm", "Spectral"] + CMAP_CHOICES),
+        _f("fill_levels", "int", "Filled contour levels", 30),
+        _f("line_levels", "int", "Contour lines", 10),
+    ] + _GRID_FIELDS + [
+        _f("title_size", "int", "Title font size", 16),
+        _f("label_size", "int", "Axis label size", 14),
     ],
 }
 
@@ -163,6 +213,12 @@ class GraphSettingsMixin:
                 and getattr(self, "output_combo", None) is not None
                 and self.output_combo.get() == "Force"):
             return "Powertrain Sizing::Force"
+        if mode == "Compare Standard Motor Data" and getattr(self, "compare_std_plot_var", None) is not None:
+            suffix = {
+                "torque": "Torque", "force": "Force",
+                "acceleration": "Acceleration", "efficiency": "Efficiency",
+            }.get(self.compare_std_plot_var.get(), "Torque")
+            return f"Compare Standard Motor Data::{suffix}"
         return mode
 
     def gs(self, key, default=None):
@@ -335,6 +391,13 @@ class GraphSettingsMixin:
                 if 0 < (hi - lo) / gy_step <= 1000:
                     ax.yaxis.set_major_locator(MultipleLocator(gy_step))
 
+            # The "seaborn-v0_8-whitegrid" base style (setup_plot_style) sets
+            # axes.axisbelow=True globally, which puts gridlines below EVERY
+            # artist including filled contours/heatmaps -- so on a colormap
+            # (efficiency maps, Parametric Study, Drive Cycle heatmap) the
+            # grid was invisible under the fill. 'line' restores matplotlib's
+            # normal default: above patches/images, below plotted lines.
+            ax.set_axisbelow('line')
             ax.grid(False)  # reset, then enable only the requested axes
             if grid_x:
                 ax.grid(True, axis="x", linestyle=grid_ls, alpha=grid_alpha)

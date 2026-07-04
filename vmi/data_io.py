@@ -54,10 +54,10 @@ class DataIOMixin:
             elif self.selected_std_motors:
                 # Save the first selected std motor's data
                 entry = self.selected_std_motors[0]
-                std_data = self.std_motor_data[entry["name"]]
+                std_entry = self.std_motor_data[entry["name"]]
                 data_dict = {
-                    "speed_rpm": std_data["speed_rpm"],
-                    "torque": std_data["torque"],
+                    "speed_rpm": std_entry["speed_rpm"],
+                    "torque": std_entry["torque"],
                     "gear_ratio_std": entry["gear_ratio"],
                     "wheel_radius": entry["wheel_radius"]
                 }
@@ -65,6 +65,13 @@ class DataIOMixin:
                 messagebox.showerror("Error", "No motor data available to save.")
                 popup.destroy()
                 return
+
+            # Carry the currently loaded Motor efficiency map along with the
+            # torque-speed curve, so a saved motor can later be compared on
+            # efficiency too, not just torque/force/acceleration.
+            eff_map = self._current_eff_map_for_save()
+            if eff_map is not None:
+                data_dict["eff_map"] = eff_map
 
             # Load existing JSON
             try:
@@ -80,7 +87,10 @@ class DataIOMixin:
             try:
                 with open("std_motor_data_sample.json", "w") as f:
                     json.dump(std_data, f, indent=2)
-                messagebox.showinfo("Success", f"Motor data saved as '{motor_name}' in std_motor_data_sample.json.")
+                eff_note = " (with its efficiency map)" if "eff_map" in data_dict else ""
+                messagebox.showinfo(
+                    "Success",
+                    f"Motor data saved as '{motor_name}'{eff_note} in std_motor_data_sample.json.")
                 # Reload std_motor_data in memory
                 self.std_motor_data = std_data
             except Exception as e:
@@ -89,6 +99,25 @@ class DataIOMixin:
 
         save_btn = ctk.CTkButton(popup, text="Save", command=on_save)
         save_btn.pack(pady=10)
+
+    def _current_eff_map_for_save(self):
+        """JSON-safe snapshot of the currently loaded Motor efficiency map
+        (self.eff1_map_*), or None if nothing is loaded. Shared by the
+        "Save Motor Data" popup so a saved standard motor also carries its
+        efficiency map for later comparison, not just its torque curve."""
+        tq = getattr(self, "eff1_map_torques", None)
+        rpm = getattr(self, "eff1_map_rpms", None)
+        mat = getattr(self, "eff1_map_matrix", None)
+        if tq is None or rpm is None or mat is None:
+            return None
+        try:
+            return {
+                "torque_axis": np.asarray(tq, dtype=float).tolist(),
+                "rpm_axis": np.asarray(rpm, dtype=float).tolist(),
+                "matrix": np.asarray(mat, dtype=float).tolist(),
+            }
+        except Exception:
+            return None
 
     def choose_std_motor_popup(self):
         popup = tk.Toplevel(self)
@@ -113,7 +142,12 @@ class DataIOMixin:
             self.selected_std_motors.append({
                 "name": name,
                 "gear_ratio": gear_ratio,
-                "wheel_radius": wheel_radius
+                "wheel_radius": wheel_radius,
+                # Carried straight through from the saved JSON (None if that
+                # motor was saved before efficiency maps started being stored,
+                # or was saved with no map loaded) -- lets Compare Efficiency
+                # Map compare it against whatever's currently loaded.
+                "eff_map": self.std_motor_data[name].get("eff_map"),
             })
             self.refresh_std_motor_table()
             popup.destroy()
@@ -142,7 +176,7 @@ class DataIOMixin:
                 self.eff1_map_torques = np.asarray(torque_axis, dtype=float)
                 self.eff1_map_rpms = np.asarray(rpm_axis, dtype=float)
                 self.eff1_map_matrix = np.asarray(eff_map, dtype=float)
-                self._autofill_motor_params_from_map(1, torque_axis, rpm_axis)
+                self._autofill_motor_params_from_map(1, torque_axis, rpm_axis, eff_map)
                 self.eff1_delete_button.configure(state="normal")
             else:
                 self.range_controller_eff_map_torques = torque_axis
@@ -155,7 +189,7 @@ class DataIOMixin:
                 self.eff2_map_torques = np.asarray(torque_axis, dtype=float)
                 self.eff2_map_rpms = np.asarray(rpm_axis, dtype=float)
                 self.eff2_map_matrix = np.asarray(eff_map, dtype=float)
-                self._autofill_motor_params_from_map(2, torque_axis, rpm_axis)
+                self._autofill_motor_params_from_map(2, torque_axis, rpm_axis, eff_map)
                 self.eff2_delete_button.configure(state="normal")
 
             self._sync_shared_efficiency_ticks()
@@ -489,7 +523,7 @@ class DataIOMixin:
                             self.eff1_map_torques = np.asarray(torque_axis, dtype=float)
                             self.eff1_map_rpms = np.asarray(rpm_axis, dtype=float)
                             self.eff1_map_matrix = np.asarray(eff_map, dtype=float)
-                            self._autofill_motor_params_from_map(1, torque_axis, rpm_axis)
+                            self._autofill_motor_params_from_map(1, torque_axis, rpm_axis, eff_map)
                         else:
                             self.efficiency_data_2 = df
                             self.eff2_indicator.configure(text="\u2705", text_color=COLORS['success'])
@@ -497,7 +531,7 @@ class DataIOMixin:
                             self.eff2_map_torques = np.asarray(torque_axis, dtype=float)
                             self.eff2_map_rpms = np.asarray(rpm_axis, dtype=float)
                             self.eff2_map_matrix = np.asarray(eff_map, dtype=float)
-                            self._autofill_motor_params_from_map(2, torque_axis, rpm_axis)
+                            self._autofill_motor_params_from_map(2, torque_axis, rpm_axis, eff_map)
                         self._sync_shared_efficiency_ticks()
                         popup.destroy()
                         # Refresh efficiency numbers + the current map view without

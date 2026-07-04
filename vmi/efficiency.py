@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from PIL import Image
-from scipy.interpolate import RegularGridInterpolator, UnivariateSpline
+from scipy.interpolate import RegularGridInterpolator, UnivariateSpline, NearestNDInterpolator
 from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
@@ -48,15 +48,16 @@ class EfficiencyMixin:
         finite_mask = np.isfinite(eff_vals)
         if not np.any(finite_mask):
             raise ValueError("Efficiency map contains no numeric efficiency values.")
-        fill_val = float(np.nanmedian(eff_vals[finite_mask]))
-        if not np.isfinite(fill_val):
-            fill_val = 0.9
-        eff_vals = np.where(np.isfinite(eff_vals), eff_vals, fill_val)
+        # Empty/NaN cells are kept as NaN: datasheet maps leave the region the
+        # motor can't reach blank, and back-filling them (the old median fill)
+        # painted "valid" efficiency above the torque-speed curve. NaN cells
+        # render blank in contourf and fall back to the constant-efficiency
+        # default when a drive-cycle point lands on one.
 
         # If values look like %, convert to 0-1.
         if np.nanmax(np.abs(eff_vals)) > 1.5:
             eff_vals = eff_vals / 100.0
-        eff_vals = np.clip(eff_vals, 0.01, 1.0)
+        eff_vals = np.clip(eff_vals, 0.01, 1.0)   # clip preserves NaN
 
         return torque_vals, rpm_vals, eff_vals
 
@@ -130,8 +131,8 @@ class EfficiencyMixin:
         raise ValueError("Could not parse torque/rpm axes from uploaded efficiency map.")
 
 
-    def _autofill_motor_params_from_map(self, motor, torque_axis, rpm_axis):
-        """Autofill motor input parameters from uploaded map axes when fields are not manual."""
+    def _autofill_motor_params_from_map(self, motor, torque_axis, rpm_axis, eff_matrix=None):
+        """Autofill motor input parameters from an uploaded map when fields are not manual."""
         tq = np.asarray(torque_axis, dtype=float)
         rpm = np.asarray(rpm_axis, dtype=float)
         tq = tq[np.isfinite(tq)]
@@ -142,14 +143,32 @@ class EfficiencyMixin:
         max_speed_val = float(np.nanmax(rpm))
         max_torque_val = float(np.nanmax(tq))
         # Map axes only tell us the grid extent, not the real base speed or
-        # power rating -- so autofill an envelope equal to the full map
-        # rectangle (rated speed = max speed, power = corner power). The old
+        # power rating -- so by default autofill an envelope equal to the full
+        # map rectangle (rated speed = max speed, power = corner power). The old
         # derivation used the torque AXIS MINIMUM as "torque at max speed",
         # which gave absurdly low rated speed/power and masked off most of the
         # map. Enter the motor's true rated speed / max power manually (the
         # fields stay editable) to get real power-limited masking.
         rated_speed_val = max_speed_val
         max_power_val = (max_torque_val * max_speed_val * 2 * np.pi / 60.0) / 1000.0
+        # Datasheet maps often leave the unreachable region (above the
+        # torque-speed curve) as blank/NaN cells. When such holes exist, the
+        # populated cells trace the real envelope: peak power = the largest
+        # |T|*omega among cells that actually have data, and peak torque = the
+        # largest |T| with any data. A fully populated map has no holes and
+        # keeps the rectangle values above (behavior unchanged).
+        if eff_matrix is not None:
+            try:
+                mat = np.asarray(eff_matrix, dtype=float)
+                if mat.shape == (tq.size, rpm.size) and np.isnan(mat).any():
+                    valid = np.isfinite(mat)
+                    if np.any(valid):
+                        T, R = np.meshgrid(np.abs(tq), rpm, indexing="ij")
+                        omega = R * 2.0 * np.pi / 60.0
+                        max_power_val = float(np.max((T * omega)[valid])) / 1000.0
+                        max_torque_val = float(np.max(T[valid]))
+            except Exception:
+                pass
 
         if motor == 1:
             if not self.motor1_max_speed_manual:
@@ -264,6 +283,94 @@ class EfficiencyMixin:
         )
         return acceptable
 
+    def _draw_motor_capability_curve(self, ax=None, motor=1,
+                                     label="Motor torque-speed curve"):
+        """Draw the motor's torque-speed capability curve on top of an
+        efficiency map: flat peak torque up to base RPM = peak power / peak
+        torque, then the P/omega hyperbola. This is exactly the boundary of
+        _motor_capability_mask, so anything colored above the line means the
+        mask isn't active. Mirrored into negative torque when the axes show
+        regen. Silently does nothing when peak torque/power don't parse (the
+        same condition that disables masking). Call AFTER the contours are
+        drawn -- it reads the axis limits and restores them."""
+        ax = ax if ax is not None else self.ax
+        try:
+            if motor == 1:
+                peak_torque = float(self.motor1_max_torque.get())
+                peak_power_kw = float(self.motor1_max_power.get())
+            else:
+                peak_torque = float(self.motor2_max_torque.get())
+                peak_power_kw = float(self.motor2_max_power.get())
+        except Exception:
+            return
+        if peak_torque <= 0 or peak_power_kw <= 0:
+            return
+        try:
+            xlims, ylims = ax.get_xlim(), ax.get_ylim()
+            peak_power_w = peak_power_kw * 1000.0
+            base_rpm = (peak_power_w / peak_torque) * 60.0 / (2.0 * np.pi)
+            rpm_end = max(xlims[1], base_rpm)
+            rpm_flat = np.array([max(xlims[0], 0.0), min(base_rpm, rpm_end)])
+            rpm_hyp = np.linspace(min(base_rpm, rpm_end), rpm_end, 200)
+            tq_hyp = peak_power_w / np.maximum(rpm_hyp * 2.0 * np.pi / 60.0, 1e-9)
+            tq_hyp = np.minimum(tq_hyp, peak_torque)
+            rpm_curve = np.concatenate([rpm_flat, rpm_hyp])
+            tq_curve = np.concatenate([np.full(rpm_flat.shape, peak_torque), tq_hyp])
+            ax.plot(rpm_curve, tq_curve, color="black", linewidth=2.0,
+                    linestyle="-", zorder=6, label=label)
+            if ylims[0] < 0:   # map shows regen torque: mirror the envelope
+                ax.plot(rpm_curve, -tq_curve, color="black", linewidth=2.0,
+                        linestyle="-", zorder=6)
+            # Keep the map's own extent; the curve is clipped at the edges.
+            ax.set_xlim(xlims)
+            ax.set_ylim(ylims)
+        except Exception:
+            pass
+
+    def _extrapolate_eff_gaps(self, eff_percent, torque_grid, speed_grid):
+        """Fill NaN cells (points the datasheet map didn't measure) with the
+        nearest known value on the same (torque, rpm) grid, so a hole inside
+        the motor's reachable envelope doesn't leave a blank patch next to the
+        capability curve. Nearest-neighbor only -- no extrapolated trend, so
+        it can't invent an efficiency the data doesn't support. This runs
+        BEFORE `_motor_capability_mask` is applied, so points genuinely
+        outside the envelope are still blanked afterward regardless of this
+        toggle; it only ever fills gaps, never uncovers new territory."""
+        vals = np.asarray(eff_percent, dtype=float)
+        valid = np.isfinite(vals)
+        if not np.any(valid) or np.all(valid):
+            return vals
+        tq = np.asarray(torque_grid, dtype=float)
+        rpm = np.asarray(speed_grid, dtype=float)
+        interp = NearestNDInterpolator(
+            np.column_stack([tq[valid], rpm[valid]]), vals[valid])
+        missing = ~valid
+        filled = vals.copy()
+        filled[missing] = interp(np.column_stack([tq[missing], rpm[missing]]))
+        return filled
+
+    def _dense_regrid_eff(self, torque_axis, rpm_axis, eff_matrix, n=200):
+        """Resample a (NaN-free, post-extrapolation) map onto a dense, evenly
+        spaced (torque, rpm) grid via bilinear interpolation -- the same
+        fine-grid technique the Combined/Difference maps already use
+        unconditionally. Without this, contourf on the map's own coarse,
+        unevenly-spaced axis kills an entire quad the moment ANY one of its
+        four corners is NaN, so a single rejected node just outside the
+        capability curve can erase a much larger swath of *accepted*,
+        already-filled cells next to it -- the real source of the big blank
+        wedge next to the curve, not just the literal missing cells.
+        Returns (speed_grid, torque_grid, eff_grid) ready for contourf."""
+        tq = np.asarray(torque_axis, dtype=float)
+        rpm = np.asarray(rpm_axis, dtype=float)
+        rpm_d = np.linspace(rpm.min(), rpm.max(), n)
+        tq_d = np.linspace(tq.min(), tq.max(), n)
+        speed_grid, torque_grid = np.meshgrid(rpm_d, tq_d)
+        interp = RegularGridInterpolator((tq, rpm), eff_matrix,
+                                         bounds_error=False, fill_value=np.nan)
+        pts = np.column_stack((torque_grid.ravel(), speed_grid.ravel()))
+        eff_grid = interp(pts).reshape(torque_grid.shape)
+        return speed_grid, torque_grid, eff_grid
+
     def _plot_range_efficiency_map_panel(
         self,
         ax,
@@ -278,6 +385,10 @@ class EfficiencyMixin:
     ):
         ax.set_xlabel("Speed (RPM)")
         ax.set_ylabel("Torque (Nm)")
+        # 'line': grid above the contourf fill, below plotted lines/markers --
+        # this panel doesn't route through apply_graph_style (Range analysis
+        # has no Graph Settings), so the axisbelow fix has to live here too.
+        ax.set_axisbelow('line')
         ax.grid(True, linestyle='--', alpha=0.5)
 
         if eff_map is None or torque_axis is None or rpm_axis is None:
@@ -328,6 +439,7 @@ class EfficiencyMixin:
         contour_lines = ax.contour(speed_grid, torque_grid, eff_vals, colors='black', linewidths=0.2, levels=10)
         ax.clabel(contour_lines, inline=True, fontsize=8, fmt="%.0f")
         self.range_eff_colorbar = self.figure.colorbar(contour, ax=ax, label=colorbar_label, ticks=range(0, 101, 10))
+        self._draw_motor_capability_curve(ax=ax)
 
         if overlay_rpm is not None and overlay_torque is not None:
             ov_rpm = np.asarray(overlay_rpm, dtype=float)
@@ -527,13 +639,15 @@ class EfficiencyMixin:
         return max_speed, rated_speed, max_torque,max_power
     
 
-    def _overlay_drive_cycle_on_efficiency_plot(self):
+    def _overlay_drive_cycle_on_efficiency_plot(self, regen=False):
         """Overlay the drive-cycle operating points on the current efficiency map.
 
         Uses the same force model as the efficiency numbers/Range (via
         `_drive_cycle_operating_points`). The Graph Settings 'Overlay style'
         chooses Scatter, a density/energy Heatmap (hexbin), or Both. Heatmap
         weight (point count vs tractive energy Wh) follows 'Overlay weight'.
+        `regen=True` (used by `plot_efficiency_map_regen`) overlays the
+        braking points (negative motor torque/power) instead of motoring ones.
         """
         if not (hasattr(self, "show_drive_cycle_toggle_var") and self.show_drive_cycle_toggle_var.get()):
             return
@@ -545,11 +659,12 @@ class EfficiencyMixin:
         y = np.asarray(op["motor_torque"], dtype=float)
         mp = np.asarray(op["motor_power"], dtype=float)
         dt_hr = np.asarray(op["dt_hr"], dtype=float)
-        mask = np.isfinite(x) & np.isfinite(y) & (y > 0)   # motoring points only
+        sign_mask = (y < 0) if regen else (y > 0)
+        mask = np.isfinite(x) & np.isfinite(y) & sign_mask
         if not np.any(mask):
             return
         x, y = x[mask], y[mask]
-        energy_wh = np.clip(mp[mask], 0.0, None) * dt_hr[mask]   # per-point tractive energy
+        energy_wh = np.abs(mp[mask]) * dt_hr[mask]   # per-point tractive/regen energy magnitude
 
         style = self.gs_str("overlay_style", "Scatter")
         weight = self.gs_str("overlay_weight", "Point Count")
@@ -575,7 +690,7 @@ class EfficiencyMixin:
 
         if show_sc:
             self.ax.scatter(x, y, color=COLORS['primary'], s=10, alpha=0.7,
-                            label="Drive Cycle Torque-Speed", zorder=4)
+                            label="Drive Cycle Torque-Speed" + (" (Regen)" if regen else ""), zorder=4)
 
 
     # ------------------------------------------------------------------ #
@@ -795,6 +910,12 @@ class EfficiencyMixin:
             self.eff1_map_torques, self.eff1_map_rpms, self.eff1_map_matrix = tq1, rpm1, eff1
             self.eff2_map_torques, self.eff2_map_rpms, self.eff2_map_matrix = tq2, rpm2, eff2
 
+            if self.gs_bool("extrapolate_gaps", False):
+                speed_grid1, torque_grid1 = np.meshgrid(rpm1, tq1)
+                speed_grid2, torque_grid2 = np.meshgrid(rpm2, tq2)
+                eff1 = self._extrapolate_eff_gaps(eff1, torque_grid1, speed_grid1)
+                eff2 = self._extrapolate_eff_gaps(eff2, torque_grid2, speed_grid2)
+
             rpm_min = max(float(np.min(rpm1)), float(np.min(rpm2)))
             rpm_max = min(float(np.max(rpm1)), float(np.max(rpm2)))
             tq_min = max(float(np.min(tq1)), float(np.min(tq2)))
@@ -826,6 +947,7 @@ class EfficiencyMixin:
             self.ax.tick_params(axis='both', labelsize=16)
             self.ax.grid(True, linestyle='--', alpha=0.8)
 
+            self._draw_motor_capability_curve()
             self._overlay_drive_cycle_on_efficiency_plot()
             if hasattr(self, "apply_graph_style"):
                 self.apply_graph_style()
@@ -856,10 +978,14 @@ class EfficiencyMixin:
             self.eff1_map_torques = torque_axis
             self.eff1_map_rpms = rpm_axis
             self.eff1_map_matrix = eff_map
-            self._autofill_motor_params_from_map(1, torque_axis, rpm_axis)
+            self._autofill_motor_params_from_map(1, torque_axis, rpm_axis, eff_map)
 
             eff_percent = np.asarray(eff_map, dtype=float) * 100.0
             speed_grid, torque_grid = np.meshgrid(rpm_axis, torque_axis)
+            if self.gs_bool("extrapolate_gaps", False):
+                eff_percent = self._extrapolate_eff_gaps(eff_percent, torque_grid, speed_grid)
+                speed_grid, torque_grid, eff_percent = self._dense_regrid_eff(
+                    torque_axis, rpm_axis, eff_percent)
             # Blank out combinations the motor can't physically reach (peak
             # torque up to base speed, power-limited beyond it, nothing past
             # max speed) instead of showing interpolated efficiency there.
@@ -878,6 +1004,7 @@ class EfficiencyMixin:
             self.ax.tick_params(axis='both', labelsize=16)
             self.ax.grid(True, linestyle='--', alpha=0.8)
 
+            self._draw_motor_capability_curve()
             self._overlay_drive_cycle_on_efficiency_plot()
             if hasattr(self, "apply_graph_style"):
                 self.apply_graph_style()
@@ -887,6 +1014,113 @@ class EfficiencyMixin:
             logger.error("Error plotting Motor 1 efficiency map: %s", e)
             messagebox.showerror("Plot Error", str(e))
 
+
+    def plot_efficiency_map_regen(self):
+        """Regen (braking) view of the Motor map: negative-torque half, values
+        mirrored from the uploaded (motoring-only) map.
+
+        No datasheet map measures regen efficiency separately, so the app has
+        always assumed |T|,RPM motoring efficiency applies to braking too --
+        `_interpolate_efficiency_or_constant` already looks maps up via
+        `np.abs(torque)` and `_motor_capability_mask` is already symmetric in
+        torque -- but until now there was no view that actually SHOWED that
+        assumption. This mirrors the Motor 1 map about T=0 and plots only the
+        T<=0 half, so the mirrored region is visually obvious rather than
+        implicit in the math.
+        """
+        self._last_eff_plot = self.plot_efficiency_map_regen
+        self.safe_remove_colorbar('heatmap_colorbar')
+        self.safe_remove_colorbar('efficiency_colorbar')
+        self.safe_remove_colorbar('parametric_colorbar')
+        self._remove_engine_secondary_axis()
+        self.ax.clear()
+
+        if self.efficiency_data_1 is None:
+            messagebox.showerror("Error", "No efficiency data uploaded for Motor 1.")
+            return
+
+        try:
+            cmap = self.gs_str('cmap', 'viridis')
+            fill_levels = max(2, self.gs_int('fill_levels', 50))
+            line_levels = max(1, self.gs_int('line_levels', 20))
+
+            torque_axis, rpm_axis, eff_map = self._extract_eff_map_from_dataframe(self.efficiency_data_1)
+            self.eff1_map_torques = torque_axis
+            self.eff1_map_rpms = rpm_axis
+            self.eff1_map_matrix = eff_map
+            self._autofill_motor_params_from_map(1, torque_axis, rpm_axis, eff_map)
+
+            eff_percent = np.asarray(eff_map, dtype=float) * 100.0
+            torque_pos = np.asarray(torque_axis, dtype=float)
+
+            # Mirror the motoring torque axis/matrix about T=0 to build the
+            # regen half. Datasheet torque axes are almost always >= 0 (see
+            # generate_sample_data.py); a map that already carries negative
+            # torque rows is used as-is instead of double-mirroring it.
+            if np.all(torque_pos >= 0):
+                neg_torque = -torque_pos[::-1]
+                neg_eff = eff_percent[::-1, :]
+                if np.isclose(torque_pos[0], 0.0):
+                    full_torque_axis = np.concatenate([neg_torque[:-1], torque_pos])
+                    full_eff = np.concatenate([neg_eff[:-1, :], eff_percent], axis=0)
+                else:
+                    full_torque_axis = np.concatenate([neg_torque, torque_pos])
+                    full_eff = np.concatenate([neg_eff, eff_percent], axis=0)
+            else:
+                full_torque_axis = torque_pos
+                full_eff = eff_percent
+
+            speed_grid, torque_grid = np.meshgrid(rpm_axis, full_torque_axis)
+            if self.gs_bool("extrapolate_gaps", False):
+                full_eff = self._extrapolate_eff_gaps(full_eff, torque_grid, speed_grid)
+                speed_grid, torque_grid, full_eff = self._dense_regrid_eff(
+                    full_torque_axis, rpm_axis, full_eff)
+
+            cap_mask = self._motor_capability_mask(torque_grid, speed_grid, motor=1)
+            if cap_mask is not None:
+                full_eff = np.where(cap_mask, full_eff, np.nan)
+
+            # Only the regen (T<=0) half is the point of this view -- the
+            # motoring half is already the "Plot Motor Efficiency Map" view.
+            plotted = np.where(torque_grid <= 0, full_eff, np.nan)
+
+            if not np.any(np.isfinite(plotted)):
+                self.show_placeholder_message(
+                    "No regen-capable region for the current Motor Max Torque /\n"
+                    "Max Power -- the negative-torque envelope is empty."
+                )
+                return
+
+            contour = self.ax.contourf(speed_grid, torque_grid, plotted, cmap=cmap, levels=fill_levels)
+            self.efficiency_colorbar = self.figure.colorbar(contour, ax=self.ax)
+            self.efficiency_colorbar.set_label('Regen Efficiency (%, mirrored from motoring)', fontsize=14, weight='bold')
+            self.efficiency_colorbar.ax.tick_params(labelsize=16)
+            contour_lines = self.ax.contour(speed_grid, torque_grid, plotted, colors='black', levels=line_levels, linewidths=0.5)
+            self.ax.clabel(contour_lines, inline=True, fontsize=10, fmt='%1.0f%%', rightside_up=True)
+            self.ax.axhline(0, color='#334155', linewidth=1.0, linestyle='--')
+            # torque_grid's mesh still spans the (unplotted, all-NaN) positive
+            # half too -- contourf/pcolormesh autoscale to the full mesh extent
+            # regardless of NaN, so without this the top half of the axes would
+            # just be blank space. Restrict the view to the regen half only.
+            neg_extent = full_torque_axis[full_torque_axis <= 0]
+            if neg_extent.size:
+                y_lo = float(np.min(neg_extent))
+                self.ax.set_ylim(y_lo * 1.05, max(-y_lo * 0.03, 1.0))
+            self.ax.set_xlabel('Speed (RPM)', fontsize=18, weight='bold')
+            self.ax.set_ylabel('Torque (Nm)  — negative = regen/braking', fontsize=16, weight='bold')
+            self.ax.set_title('Regen (Braking) Efficiency Map — Mirrored from Motoring Data', fontsize=18, weight='bold')
+            self.ax.tick_params(axis='both', labelsize=16)
+            self.ax.grid(True, linestyle='--', alpha=0.8)
+
+            self._draw_motor_capability_curve()
+            self._overlay_drive_cycle_on_efficiency_plot(regen=True)
+            if hasattr(self, "apply_graph_style"):
+                self.apply_graph_style()
+            self.figure.tight_layout()
+            self.canvas.draw()
+        except Exception as e:
+            logger.error("Error plotting regen efficiency map: %s", e)
+            messagebox.showerror("Plot Error", str(e))
 
     def plot_efficiency_map_motor2(self):
         self._last_eff_plot = self.plot_efficiency_map_motor2  # for live graph-settings updates
@@ -909,10 +1143,14 @@ class EfficiencyMixin:
             self.eff2_map_torques = torque_axis
             self.eff2_map_rpms = rpm_axis
             self.eff2_map_matrix = eff_map
-            self._autofill_motor_params_from_map(2, torque_axis, rpm_axis)
+            self._autofill_motor_params_from_map(2, torque_axis, rpm_axis, eff_map)
 
             eff_percent = np.asarray(eff_map, dtype=float) * 100.0
             speed_grid, torque_grid = np.meshgrid(rpm_axis, torque_axis)
+            if self.gs_bool("extrapolate_gaps", False):
+                eff_percent = self._extrapolate_eff_gaps(eff_percent, torque_grid, speed_grid)
+                speed_grid, torque_grid, eff_percent = self._dense_regrid_eff(
+                    torque_axis, rpm_axis, eff_percent)
             # Same motor envelope as the Motor map: the controller can't drive
             # the shaft past what the motor itself can physically reach.
             cap_mask = self._motor_capability_mask(torque_grid, speed_grid, motor=1)
@@ -930,6 +1168,7 @@ class EfficiencyMixin:
             self.ax.tick_params(axis='both', labelsize=16)
             self.ax.grid(True, linestyle='--', alpha=0.8)
 
+            self._draw_motor_capability_curve()
             self._overlay_drive_cycle_on_efficiency_plot()
             if hasattr(self, "apply_graph_style"):
                 self.apply_graph_style()
@@ -960,6 +1199,12 @@ class EfficiencyMixin:
 
             eff1_pct = np.asarray(eff1, dtype=float) * 100.0
             eff2_pct = np.asarray(eff2, dtype=float) * 100.0
+
+            if self.gs_bool("extrapolate_gaps", False):
+                speed_grid1, torque_grid1 = np.meshgrid(rpm1, tq1)
+                speed_grid2, torque_grid2 = np.meshgrid(rpm2, tq2)
+                eff1_pct = self._extrapolate_eff_gaps(eff1_pct, torque_grid1, speed_grid1)
+                eff2_pct = self._extrapolate_eff_gaps(eff2_pct, torque_grid2, speed_grid2)
 
             rpm_min = max(float(np.min(rpm1)), float(np.min(rpm2)))
             rpm_max = min(float(np.max(rpm1)), float(np.max(rpm2)))
@@ -1006,6 +1251,7 @@ class EfficiencyMixin:
             self.ax.set_title('Efficiency Difference Plot (Controller vs Motor)', fontsize=20, weight='bold')
             self.ax.tick_params(axis='both', labelsize=16)
             self.ax.grid(True, linestyle='--', alpha=0.8)
+            self._draw_motor_capability_curve()
             if hasattr(self, "apply_graph_style"):
                 self.apply_graph_style()
             self.figure.tight_layout()

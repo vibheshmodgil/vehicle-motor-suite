@@ -290,9 +290,358 @@ class EnhancementsMixin:
             messagebox.showerror("Export error", str(exc))
 
     # ------------------------------------------------------------------ #
-    #  One-click HTML report                                             #
+    #  Multi-analysis HTML report                                        #
     # ------------------------------------------------------------------ #
+    # Which result-label widget(s) hold the numeric summary for each
+    # analysis. Analyses with no entry (or an empty/blank label) fall back to
+    # "(no numeric summary for this view)" in the report -- the figure is
+    # still included either way.
+    _REPORT_LABEL_ATTRS = {
+        "Powertrain Sizing": ["params_label"],
+        "Acceleration": ["params_label"],
+        "Parametric Study": ["params_label"],
+        "Drive Cycle": ["params_label"],
+        "Engine analysis": ["engine_results_label"],
+        "Drive Cycle Efficiency": ["drive_cycle_efficiency_label"],
+        "Range analysis": ["range_results_label", "drive_cycle_efficiency_label"],
+        "MTPA / MTPV (PMSM)": ["mtpa_results_label"],
+    }
+
     def generate_report(self):
+        """Ask which analyses to include, then build one HTML report holding
+        an image + numeric summary per selected analysis -- not just whatever
+        is on screen right now."""
+        analyses = list(getattr(self, "analysis_sections", {}).keys()) or [self.plot_type.get()]
+        self._open_report_picker(analyses)
+
+    def _open_report_picker(self, analyses):
+        popup = tk.Toplevel(self)
+        popup.title("Generate Report")
+        popup.configure(bg=COLORS['background'])
+        popup.grab_set()
+
+        ctk.CTkLabel(
+            popup, text="Include these analyses in the report:",
+            font=(COLORS_FONT, 13, "bold"),
+        ).pack(pady=(14, 6), padx=16, anchor="w")
+        ctk.CTkLabel(
+            popup,
+            text="Each selected analysis is re-plotted (using its currently\n"
+                 "loaded data) and added as its own image + summary section.",
+            font=(COLORS_FONT, 11), text_color=COLORS['text_muted'],
+            justify="left", anchor="w",
+        ).pack(padx=16, anchor="w", pady=(0, 8))
+
+        check_frame = ctk.CTkFrame(popup, fg_color="transparent")
+        check_frame.pack(fill="both", expand=True, padx=16)
+        current = getattr(self, "plot_mode", None) or self.plot_type.get()
+        check_vars = {}
+        for name in analyses:
+            var = tk.BooleanVar(value=(name == current))
+            ctk.CTkCheckBox(check_frame, text=name, variable=var).pack(anchor="w", pady=3)
+            check_vars[name] = var
+
+        btn_row = ctk.CTkFrame(popup, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(8, 4))
+        ctk.CTkButton(btn_row, text="Select All", width=100,
+                     command=lambda: [v.set(True) for v in check_vars.values()]).pack(side="left")
+        ctk.CTkButton(btn_row, text="Clear", width=100,
+                     command=lambda: [v.set(False) for v in check_vars.values()]).pack(side="left", padx=(6, 0))
+
+        def on_generate():
+            selected = [name for name in analyses if check_vars[name].get()]
+            popup.destroy()
+            if not selected:
+                self.set_status("Report: no analyses selected.", "warn")
+                return
+            self._generate_multi_analysis_report(selected)
+
+        ctk.CTkButton(popup, text="Generate Report", command=on_generate,
+                     fg_color=COLORS["primary"]).pack(padx=16, pady=(6, 14), fill="x")
+        popup.update_idletasks()
+        h = min(560, 210 + 32 * len(analyses))
+        popup.geometry(f"380x{h}")
+
+    def _report_summary_html(self, name):
+        """Text/table summary for one analysis's report section, drawn from
+        whatever result label(s)/metrics that analysis actually has."""
+        blocks = []
+        for attr in self._REPORT_LABEL_ATTRS.get(name, []):
+            widget = getattr(self, attr, None)
+            if widget is None:
+                continue
+            try:
+                text = widget.cget("text")
+            except Exception:
+                text = ""
+            if text:
+                blocks.append(f"<p>{text.replace(chr(10), '<br>')}</p>")
+
+        if name == "Range analysis":
+            metrics = getattr(self, "_last_range_metrics", None)
+            if metrics:
+                rows = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in metrics.items())
+                blocks.append(f"<table><tbody>{rows}</tbody></table>")
+
+        if name == "Compare Standard Motor Data":
+            motors = getattr(self, "selected_std_motors", None) or []
+            if motors:
+                rows = "".join(
+                    f"<tr><td>{m.get('name', '')}</td><td>{m.get('gear_ratio', '')}</td>"
+                    f"<td>{m.get('wheel_radius', '')}</td></tr>" for m in motors)
+                blocks.append(
+                    "<table><thead><tr><th>Motor</th><th>Gear Ratio</th>"
+                    f"<th>Wheel Radius (m)</th></tr></thead><tbody>{rows}</tbody></table>")
+
+        return "\n".join(blocks) if blocks else "<p><em>(no numeric summary for this view)</em></p>"
+
+    def _report_widget_text(self, attr_name):
+        w = getattr(self, attr_name, None)
+        if w is None:
+            return ""
+        try:
+            return str(w.get())
+        except Exception:
+            return ""
+
+    def _report_gear_ratio(self):
+        try:
+            return float(self.gear_ratio.get())
+        except Exception:
+            return 1.0
+
+    def _report_core_inputs_html(self):
+        """Table of the shared vehicle/motor inputs almost every analysis is
+        built on -- shown ONCE at the top of the report (they don't change
+        between views/analyses, so repeating them per section would just be
+        noise). Read defensively: a blank/invalid field just shows blank
+        rather than aborting the whole report."""
+        g = self._report_widget_text
+        crr = g("crr")
+        cd_a = g("cd_a")
+        rows = [
+            ("Reference Mass (kg)", g("m_ref")),
+            ("Rear Load Ratio", g("rear_load_ratio")),
+            ("Ambient Temperature (°C)", g("ambient_temp")),
+            ("Ambient Pressure (kPa)", g("ambient_pressure")),
+            ("Crr", crr if crr else "(auto-estimated from mass)"),
+            ("CdA (m²)", f"{cd_a} m²" if cd_a else "(auto-estimated from mass)"),
+            ("Gear Ratio", g("gear_ratio")),
+            ("Wheel Radius (m)", g("wheel_radius")),
+            ("Peak Torque (Nm)", g("peak_torque")),
+            ("Peak Power (kW)", g("peak_power")),
+            ("Continuous Power (kW)", g("continuous_power")),
+            ("Peak : Rated Torque Ratio", g("peak_to_rated_torque_ratio")),
+            ("Gradients (%)", g("gradients")),
+            ("Speed Unit", g("speed_unit_combo")),
+            ("Output (Torque / Force)", g("output_combo")),
+            ("Motor Curve Source",
+             "Uploaded Excel curve" if getattr(self, "motor_dataframe", None) is not None
+             else "Theoretical (Peak Torque / Peak Power fields)"),
+        ]
+        trs = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in rows)
+        return f"<table><tbody>{trs}</tbody></table>"
+
+    def _report_analysis_inputs_html(self, analysis):
+        """Extra inputs specific to one analysis's own model, for analyses
+        that don't share the vehicle/motor inputs above at all. Returns ""
+        for everything else (the shared table already covers them)."""
+        g = self._report_widget_text
+        if analysis == "MTPA / MTPV (PMSM)":
+            rows = [
+                ("Pole Pairs (p)", g("mtpa_pole_pairs")),
+                ("Ld (mH)", g("mtpa_ld_mh")),
+                ("Lq (mH)", g("mtpa_lq_mh")),
+                ("PM Flux Linkage ψ_PM (Wb)", g("mtpa_psi_pm")),
+                ("Max Current (A)", g("mtpa_imax")),
+                ("Winding Connection", g("mtpa_conn_combo")),
+                ("Current Given As", g("mtpa_current_qty_combo")),
+                ("Current Value Is", g("mtpa_current_meas_combo")),
+                ("DC Link Voltage (V)", g("mtpa_vdc")),
+                ("Voltage Limit (PWM)", g("mtpa_vlimit_combo")),
+                ("Max Speed (RPM)", g("mtpa_max_rpm")),
+            ]
+            trs = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in rows)
+            return f"<p><strong>Analysis inputs</strong></p><table><tbody>{trs}</tbody></table>"
+        return ""
+
+    def _render_report_views(self, analysis):
+        """Render every distinct plot this analysis contributes to the
+        report. Returns a list of (subtitle, b64_png) tuples -- subtitle is
+        "" for a single-view analysis, in which case the section just uses
+        the analysis name with no suffix.
+
+        Explicit per-analysis branches on purpose (not a generic loop): each
+        analysis's "views" are controlled by completely different widgets
+        (Output/Plotting Part combos, the heatmap switch, the map buttons,
+        the Compare radio buttons, ...), so a one-size-fits-all abstraction
+        would just hide what's actually being toggled. If you add a new
+        analysis mode with more than one meaningful view, add a branch here;
+        everything else falls through to the single generic `update_plot()`
+        capture at the bottom.
+        """
+        self.plot_type.set(analysis)
+        self.plot_mode = analysis
+        self.show_sections_for_analysis(analysis)
+        out = []
+
+        def snap(subtitle=""):
+            self.canvas.draw()
+            self.update_idletasks()
+            png = io.BytesIO()
+            self.figure.savefig(png, format="png", dpi=150, bbox_inches="tight",
+                                facecolor=self.figure.get_facecolor())
+            png.seek(0)
+            out.append((subtitle, base64.b64encode(png.read()).decode("ascii")))
+
+        if analysis == "Powertrain Sizing":
+            # Torque always gets its own view; Force is wheel-only (locked)
+            # so it never needs a motor-side duplicate. The motor-side Torque
+            # view only adds information when the gearbox actually changes
+            # the numbers, i.e. gear ratio != 1.
+            self.output_combo.set("Torque")
+            self.plot_part_combo.set("At Wheel")
+            self.update_plot()
+            snap("Torque - At Wheel")
+            if abs(self._report_gear_ratio() - 1.0) > 1e-9:
+                self.plot_part_combo.set("At Motor")
+                self.update_plot()
+                snap("Torque - At Motor")
+            self.output_combo.set("Force")
+            self.update_plot()
+            snap("Force (Wheel)")
+
+        elif analysis == "Drive Cycle":
+            if getattr(self, "dataframe", None) is None:
+                self.show_placeholder_message("Insert Data or click the plot button")
+                snap()
+            else:
+                self.plot_drive_cycle()
+                snap("Speed vs Time")
+                if hasattr(self, "heatmap_var"):
+                    self.heatmap_var.set(False)
+                self.plot_torque_speed_drive_cycle(show_popup=False)
+                snap("Torque-Speed Scatter")
+                if hasattr(self, "heatmap_var"):
+                    self.heatmap_var.set(True)
+                    self.plot_torque_speed_drive_cycle(show_popup=False)
+                    snap("Torque-Speed Heatmap")
+                    self.heatmap_var.set(False)
+
+        elif analysis == "Drive Cycle Efficiency":
+            # This analysis is entirely button-driven in the UI (dispatch's
+            # plot_graph has no branch for it), so update_plot() alone would
+            # just land on the "Insert Data or Update Plot" placeholder --
+            # each map view has to be called directly.
+            have1 = getattr(self, "efficiency_data_1", None) is not None
+            have2 = getattr(self, "efficiency_data_2", None) is not None
+            if have1:
+                self.plot_efficiency_map_motor1()
+                snap("Motor Efficiency Map")
+                self.plot_efficiency_map_regen()
+                snap("Regen (Braking) Efficiency Map")
+            if have2:
+                self.plot_efficiency_map_motor2()
+                snap("Controller Efficiency Map")
+            if have1 and have2:
+                self.plot_efficiency_map_combined()
+                snap("Combined Efficiency Map (Motor × Controller)")
+                self.plot_efficiency_difference_map()
+                snap("Efficiency Difference Map (Controller − Motor)")
+            if not out:
+                self.show_placeholder_message(
+                    "Upload the Motor and/or Controller efficiency maps to see this analysis.")
+                snap()
+
+        elif analysis == "Compare Standard Motor Data":
+            if not getattr(self, "selected_std_motors", None):
+                self.show_placeholder_message("Choose at least one standard motor to compare.")
+                snap()
+            else:
+                self.compare_std_plot_var.set("torque")
+                self.update_compare_std_plot()
+                snap("Torque")
+                self.compare_std_plot_var.set("force")
+                self.update_compare_std_plot()
+                snap("Force")
+                self.compare_std_plot_var.set("acceleration")
+                self.update_compare_std_plot()
+                snap("Acceleration")
+                have_current_map = getattr(self, "eff1_map_torques", None) is not None
+                have_saved_map = any(e.get("eff_map") for e in self.selected_std_motors)
+                if have_current_map and have_saved_map:
+                    self.compare_std_plot_var.set("efficiency")
+                    self.update_compare_std_plot()
+                    snap("Efficiency Map")
+
+        else:
+            # Acceleration, Parametric Study, Engine analysis: no sub-views.
+            # Range analysis and MTPA/MTPV already default to an "All" /
+            # multi-panel dashboard covering everything in one figure.
+            self.update_plot()
+            snap()
+
+        return out
+
+    def generate_report(self):
+        """Ask which analyses to include, then build one HTML report holding
+        every plot view + numeric summary for each -- not just whatever
+        single view is on screen right now."""
+        analyses = list(getattr(self, "analysis_sections", {}).keys()) or [self.plot_type.get()]
+        self._open_report_picker(analyses)
+
+    def _open_report_picker(self, analyses):
+        popup = tk.Toplevel(self)
+        popup.title("Generate Report")
+        popup.configure(bg=COLORS['background'])
+        popup.grab_set()
+
+        ctk.CTkLabel(
+            popup, text="Include these analyses in the report:",
+            font=(COLORS_FONT, 13, "bold"),
+        ).pack(pady=(14, 6), padx=16, anchor="w")
+        ctk.CTkLabel(
+            popup,
+            text="Every distinct plot for each selected analysis is included\n"
+                 "(e.g. Powertrain Sizing gets Torque AND Force, both wheel-\n"
+                 "and motor-side when the gear ratio isn't 1:1), using whatever\n"
+                 "data is already loaded. Vehicle/motor inputs are listed once\n"
+                 "at the top of the report.",
+            font=(COLORS_FONT, 11), text_color=COLORS['text_muted'],
+            justify="left", anchor="w",
+        ).pack(padx=16, anchor="w", pady=(0, 8))
+
+        check_frame = ctk.CTkFrame(popup, fg_color="transparent")
+        check_frame.pack(fill="both", expand=True, padx=16)
+        current = getattr(self, "plot_mode", None) or self.plot_type.get()
+        check_vars = {}
+        for name in analyses:
+            var = tk.BooleanVar(value=(name == current))
+            ctk.CTkCheckBox(check_frame, text=name, variable=var).pack(anchor="w", pady=3)
+            check_vars[name] = var
+
+        btn_row = ctk.CTkFrame(popup, fg_color="transparent")
+        btn_row.pack(fill="x", padx=16, pady=(8, 4))
+        ctk.CTkButton(btn_row, text="Select All", width=100,
+                     command=lambda: [v.set(True) for v in check_vars.values()]).pack(side="left")
+        ctk.CTkButton(btn_row, text="Clear", width=100,
+                     command=lambda: [v.set(False) for v in check_vars.values()]).pack(side="left", padx=(6, 0))
+
+        def on_generate():
+            selected = [name for name in analyses if check_vars[name].get()]
+            popup.destroy()
+            if not selected:
+                self.set_status("Report: no analyses selected.", "warn")
+                return
+            self._generate_multi_analysis_report(selected)
+
+        ctk.CTkButton(popup, text="Generate Report", command=on_generate,
+                     fg_color=COLORS["primary"]).pack(padx=16, pady=(6, 14), fill="x")
+        popup.update_idletasks()
+        h = min(600, 260 + 32 * len(analyses))
+        popup.geometry(f"420x{h}")
+
+    def _generate_multi_analysis_report(self, analyses):
         path = filedialog.asksaveasfilename(
             title="Save report",
             defaultextension=".html",
@@ -301,37 +650,76 @@ class EnhancementsMixin:
         )
         if not path:
             return
+
+        # Snapshot everything the report is about to change so it can be put
+        # back exactly as the user left it once generation finishes.
+        original_mode = self.plot_type.get()
+        original_output = self._report_widget_text("output_combo")
+        original_plot_part = self._report_widget_text("plot_part_combo")
+        original_heatmap = bool(self.heatmap_var.get()) if hasattr(self, "heatmap_var") else None
+        original_compare_plot = self._report_widget_text("compare_std_plot_var") or None
+
+        sections = []
+        toc = ["<li><a href='#inputs'>Vehicle &amp; Motor Inputs</a></li>"]
         try:
-            png = io.BytesIO()
-            self.figure.savefig(png, format="png", dpi=160, bbox_inches="tight",
-                                facecolor=self.figure.get_facecolor())
-            png.seek(0)
-            b64 = base64.b64encode(png.read()).decode("ascii")
-
-            mode = getattr(self, "plot_mode", "Analysis")
-            summary = ""
-            if hasattr(self, "range_results_label"):
+            self.configure(cursor="watch")
+            self.update_idletasks()
+        except Exception:
+            pass
+        try:
+            n_views_total = 0
+            for name in analyses:
                 try:
-                    summary = self.range_results_label.cget("text")
-                except Exception:
-                    summary = ""
+                    views = self._render_report_views(name)
+                    analysis_inputs_html = self._report_analysis_inputs_html(name)
+                    summary_html = self._report_summary_html(name)
+                    for i, (subtitle, b64) in enumerate(views):
+                        anchor = f"section-{len(sections)}"
+                        title = f"{name} — {subtitle}" if subtitle else name
+                        section_summary = summary_html
+                        if i == 0 and analysis_inputs_html:
+                            section_summary = analysis_inputs_html + section_summary
+                        sections.append(_REPORT_SECTION_TEMPLATE.format(
+                            anchor=anchor, name=title, b64=b64, summary=section_summary))
+                        toc.append(f"<li><a href='#{anchor}'>{title}</a></li>")
+                        n_views_total += 1
+                except Exception as exc:
+                    anchor = f"section-{len(sections)}"
+                    sections.append(
+                        f"<div class='card' id='{anchor}'><h2>{name}</h2>"
+                        f"<p style='color:#b91c1c'>Could not render this analysis: {exc}</p></div>")
+                    toc.append(f"<li><a href='#{anchor}'>{name}</a></li>")
+        finally:
+            try:
+                self.plot_type.set(original_mode)
+                if original_output:
+                    self.output_combo.set(original_output)
+                if original_plot_part:
+                    self.plot_part_combo.set(original_plot_part)
+                if original_heatmap is not None:
+                    self.heatmap_var.set(original_heatmap)
+                if original_compare_plot:
+                    self.compare_std_plot_var.set(original_compare_plot)
+                self.update_plot()
+            except Exception:
+                pass
+            try:
+                self.configure(cursor="")
+            except Exception:
+                pass
 
-            rows = ""
-            metrics = getattr(self, "_last_range_metrics", None)
-            if metrics:
-                for k, v in metrics.items():
-                    rows += f"<tr><td>{k}</td><td>{v}</td></tr>"
-
+        try:
             stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-            html = _REPORT_TEMPLATE.format(
-                mode=mode, stamp=stamp, b64=b64,
-                summary=(summary or "(no numeric summary for this view)").replace("\n", "<br>"),
-                rows=rows or "<tr><td colspan='2'>No metrics table for this view.</td></tr>",
+            inputs_html = self._report_core_inputs_html()
+            html = _MULTI_REPORT_TEMPLATE.format(
+                stamp=stamp, inputs=inputs_html, toc="\n".join(toc), sections="\n".join(sections),
                 primary=COLORS["primary"], dark=COLORS["header_bg"],
             )
             with open(path, "w", encoding="utf-8") as f:
                 f.write(html)
-            self.set_status(f"Report saved: {os.path.basename(path)}", "ok")
+            self.set_status(
+                f"Report saved: {os.path.basename(path)} "
+                f"({len(analyses)} analyses, {n_views_total} plots)", "ok")
             try:
                 webbrowser.open("file://" + os.path.abspath(path))
             except Exception:
@@ -441,6 +829,13 @@ class EnhancementsMixin:
                  attrs=["range_controller_efficiency_map", "range_controller_eff_map_torques", "range_controller_eff_map_rpms"],
                  primary="range_controller_efficiency_map", indicator="range_controller_eff_indicator",
                  buttons=["range_controller_eff_delete_button"]),
+            # MTPA/MTPV saturation maps: {'id','iq','m'} dicts of ndarrays.
+            dict(name="mtpa_ld_map", attrs=["mtpa_ld_map"], primary="mtpa_ld_map",
+                 indicator="mtpa_ld_indicator", buttons=["mtpa_ld_delete_button"]),
+            dict(name="mtpa_lq_map", attrs=["mtpa_lq_map"], primary="mtpa_lq_map",
+                 indicator="mtpa_lq_indicator", buttons=["mtpa_lq_delete_button"]),
+            dict(name="mtpa_psi_map", attrs=["mtpa_psi_map"], primary="mtpa_psi_map",
+                 indicator="mtpa_psi_indicator", buttons=["mtpa_psi_delete_button"]),
         ]
 
     def _set_indicator(self, indicator_name, present, button_names=()):
@@ -672,7 +1067,13 @@ class EnhancementsMixin:
 # Font family pulled once (avoids importing FONTS name clashes in the methods).
 COLORS_FONT = "Segoe UI"
 
-_REPORT_TEMPLATE = """<!DOCTYPE html>
+_REPORT_SECTION_TEMPLATE = """<div class="card" id="{anchor}">
+ <h2>{name}</h2>
+ <img src="data:image/png;base64,{b64}" alt="{name} figure">
+ <div class="summary">{summary}</div>
+</div>"""
+
+_MULTI_REPORT_TEMPLATE = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <title>Vehicle - Motor Integration Report</title>
 <style>
@@ -680,19 +1081,23 @@ _REPORT_TEMPLATE = """<!DOCTYPE html>
  header{{background:{dark};color:#fff;padding:22px 32px}}
  header h1{{margin:0;font-size:22px}} header p{{margin:4px 0 0;color:#a5b4fc;font-size:13px}}
  main{{max-width:980px;margin:24px auto;padding:0 24px}}
- .card{{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:20px;margin-bottom:20px}}
- .card h2{{margin:0 0 12px;font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:{primary}}}
+ nav.toc{{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px 20px;margin-bottom:20px}}
+ nav.toc h2{{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:{primary}}}
+ nav.toc ul{{margin:0;padding-left:20px}} nav.toc a{{color:{primary};text-decoration:none}}
+ nav.toc a:hover{{text-decoration:underline}}
+ .card{{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:20px;margin-bottom:20px;scroll-margin-top:16px}}
+ .card h2{{margin:0 0 12px;font-size:16px;color:{primary}}}
  img{{max-width:100%;border-radius:10px;border:1px solid #e2e8f0}}
- table{{width:100%;border-collapse:collapse;font-size:14px}}
- td{{padding:7px 10px;border-bottom:1px solid #eef1f7}} td:first-child{{color:#475569}}
- .summary{{font-size:14px;line-height:1.6}}
+ table{{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}}
+ td,th{{padding:7px 10px;border-bottom:1px solid #eef1f7;text-align:left}} td:first-child{{color:#475569}}
+ .summary{{font-size:14px;line-height:1.6;margin-top:12px}}
  footer{{text-align:center;color:#94a3b8;font-size:12px;padding:18px}}
 </style></head><body>
-<header><h1>Vehicle &harr; Motor Integration &mdash; {mode}</h1><p>Generated {stamp}</p></header>
+<header><h1>Vehicle &harr; Motor Integration Report</h1><p>Generated {stamp}</p></header>
 <main>
- <div class="card"><h2>Figure</h2><img src="data:image/png;base64,{b64}" alt="figure"></div>
- <div class="card"><h2>Summary</h2><div class="summary">{summary}</div></div>
- <div class="card"><h2>Metrics</h2><table>{rows}</table></div>
+ <div class="card" id="inputs"><h2>Vehicle &amp; Motor Inputs</h2>{inputs}</div>
+ <nav class="toc"><h2>Contents</h2><ul>{toc}</ul></nav>
+ {sections}
 </main>
 <footer>Produced by the Vehicle-Motor Integration Suite</footer>
 </body></html>"""

@@ -11,6 +11,9 @@ slot in the app, in exactly the formats the loaders expect:
   gear_efficiency.xlsx        -> Engine gear efficiency, sheets G1..G6 (RPM, Efficiency)
   efficiency_map_motor1.xlsx  -> Drive Cycle Efficiency / Range motor map
   efficiency_map_motor2.xlsx  -> Drive Cycle Efficiency / Range controller map
+  mtpa_ld_map.xlsx            -> MTPA/MTPV Ld saturation map (id x iq, mH)
+  mtpa_lq_map.xlsx            -> MTPA/MTPV Lq saturation map (id x iq, mH)
+  mtpa_psi_map.xlsx           -> MTPA/MTPV psi_PM map (id x iq, Wb)
 
 The two efficiency-map files use the single layout that satisfies every reader
 in the app: first column = torque axis, remaining column headers = RPM, cells =
@@ -122,6 +125,31 @@ def make_efficiency_map(filename, peak_eff, t_peak, r_peak):
     return df.shape
 
 
+# --------------------------------------------------------------------------- #
+#  7. MTPA/MTPV d-q saturation maps: id (rows) x iq (cols)                     #
+#     Ld/Lq cells in mH, psi_PM cells in Wb. Simple saturation + cross-        #
+#     coupling shapes around the app's default constants.                      #
+# --------------------------------------------------------------------------- #
+def make_mtpa_dq_maps(i_max=200.0, ld0_mh=0.15, lq0_mh=0.35, psi0=0.015, n=11):
+    id_axis = np.linspace(-i_max, 0.0, n)        # demagnetising direction
+    iq_axis = np.linspace(0.0, i_max, n)
+    ID, IQ = np.meshgrid(id_axis, iq_axis, indexing="ij")
+    i_norm = np.hypot(ID, IQ) / i_max
+    # q-axis saturates hardest with iq; Ld droops mildly; psi drops with |i|.
+    ld_mh = ld0_mh * (1.0 - 0.10 * (IQ / i_max) - 0.05 * i_norm)
+    lq_mh = lq0_mh * (1.0 - 0.25 * (IQ / i_max) ** 1.5)
+    psi_wb = psi0 * (1.0 - 0.08 * i_norm)
+    for fname, mat, digits in (("mtpa_ld_map.xlsx", ld_mh, 4),
+                               ("mtpa_lq_map.xlsx", lq_mh, 4),
+                               ("mtpa_psi_map.xlsx", psi_wb, 5)):
+        df = pd.DataFrame(np.round(mat, digits),
+                          index=np.round(id_axis, 1),
+                          columns=np.round(iq_axis, 1))
+        df.index.name = "id\\iq"
+        df.to_excel(_path(fname))
+    return (n, n)
+
+
 if __name__ == "__main__":
     np.random.seed(0)
     n_dc = make_drive_cycle()
@@ -130,6 +158,7 @@ if __name__ == "__main__":
     make_gear_efficiency()
     s1 = make_efficiency_map("efficiency_map_motor1.xlsx", peak_eff=0.95, t_peak=70, r_peak=3000)
     s2 = make_efficiency_map("efficiency_map_motor2.xlsx", peak_eff=0.93, t_peak=60, r_peak=3500)
+    s3 = make_mtpa_dq_maps()
 
     print(f"Sample data written to: {OUT_DIR}")
     print(f"  drive_cycle.xlsx           ({n_dc} rows)")
@@ -138,3 +167,4 @@ if __name__ == "__main__":
     print(f"  gear_efficiency.xlsx       (sheets G1..G6)")
     print(f"  efficiency_map_motor1.xlsx (torque x rpm = {s1[0]} x {s1[1]})")
     print(f"  efficiency_map_motor2.xlsx (torque x rpm = {s2[0]} x {s2[1]})")
+    print(f"  mtpa_ld/lq/psi_map.xlsx    (id x iq = {s3[0]} x {s3[1]})")

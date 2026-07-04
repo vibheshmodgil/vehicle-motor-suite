@@ -182,7 +182,57 @@ class ParametricMixin:
         return np.nan
 
 
-    def _draw_parametric_contour(self, cda_values, crr_values, value_map, title, cbar_label):
+    def _mark_current_param_1d(self, values, current_val, y_values, param_symbol):
+        """Highlight where the vehicle's currently configured CdA/Crr (the
+        value actually used everywhere else in the app, held constant while
+        the OTHER parameter is swept) falls on a 1D parametric line, so the
+        user isn't looking at an abstract curve with no sense of where their
+        real vehicle sits on it. Draws a vertical reference line (always) plus
+        a star marker on the curve itself (only when the current value falls
+        inside the swept range -- outside it, the line is still drawn but
+        labeled so, since there's no curve point to mark)."""
+        values = np.asarray(values, dtype=float)
+        lo, hi = float(np.min(values)), float(np.max(values))
+        in_range = lo <= current_val <= hi
+        xlim = self.ax.get_xlim()  # axvline can otherwise stretch the x-axis
+        label = f"Current {param_symbol} = {current_val:.4g}"
+        if not in_range:
+            label += " (outside sweep)"
+        self.ax.axvline(current_val, color='crimson', linestyle=':', linewidth=1.8,
+                         zorder=4, label=label)
+        if in_range and y_values is not None:
+            y_here = float(np.interp(current_val, values, np.asarray(y_values, dtype=float)))
+            self.ax.plot(current_val, y_here, marker='*', markersize=14, color='crimson',
+                         markeredgecolor='black', markeredgewidth=0.6, zorder=6)
+        self.ax.set_xlim(xlim)
+
+    def _mark_current_param_2d(self, current_cda, current_crr):
+        """Same idea as `_mark_current_param_1d` but for the CdA & Crr contour
+        maps: marks the (CdA, Crr) point the rest of the app is actually using
+        right now. If it falls outside the swept grid there's nowhere sensible
+        to put a marker without distorting the axes, so a text note in the
+        corner states the current values instead."""
+        cda_lo, cda_hi = self.ax.get_xlim()
+        crr_lo, crr_hi = self.ax.get_ylim()
+        if cda_lo <= current_cda <= cda_hi and crr_lo <= current_crr <= crr_hi:
+            self.ax.plot(current_cda, current_crr, marker='*', markersize=18, color='white',
+                         markeredgecolor='black', markeredgewidth=1.3, zorder=6,
+                         label="Current CdA & Crr")
+            self.ax.annotate(
+                "Current", xy=(current_cda, current_crr), xytext=(8, 8),
+                textcoords='offset points', color='black', fontsize=10, fontweight='bold',
+                bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='black', alpha=0.85),
+            )
+        else:
+            self.ax.text(
+                0.02, 0.98,
+                f"Current CdA={current_cda:.4g}, Crr={current_crr:.4g} (outside plotted range)",
+                transform=self.ax.transAxes, fontsize=9, va='top', ha='left', color='crimson',
+                bbox=dict(boxstyle='round,pad=0.3', fc='white', ec='crimson', alpha=0.9),
+            )
+
+    def _draw_parametric_contour(self, cda_values, crr_values, value_map, title, cbar_label,
+                                  current_cda=None, current_crr=None):
         """Filled contour of a CdA x Crr result grid, with the black line overlay
         and colorbar. Fails soft: if every cell is NaN/constant (e.g. the motor
         can't reach the target anywhere) it shows a message instead of letting
@@ -220,6 +270,8 @@ class ParametricMixin:
         self.ax.set_xlabel("CdA (m^2)", fontsize=14)
         self.ax.set_ylabel("Crr", fontsize=14)
         self.ax.grid(True, linestyle='--', alpha=0.5)
+        if current_cda is not None and current_crr is not None:
+            self._mark_current_param_2d(current_cda, current_crr)
 
     def plot_parametric_study(self, params, wheel_radius, peak_torque, peak_power, gear_ratio):
         self.safe_remove_colorbar('heatmap_colorbar')
@@ -269,6 +321,7 @@ class ParametricMixin:
             self.ax.set_xlabel("CdA (m^2)", fontsize=14)
             self.ax.set_ylabel("Top Speed (km/h)", fontsize=14)
             self.ax.grid(True, linestyle='--', alpha=0.7)
+            self._mark_current_param_1d(cda_values, base_cda, top_speeds, "CdA")
 
         elif graph_type == "Effect of Crr on Top Speed":
             top_speeds = [
@@ -280,6 +333,7 @@ class ParametricMixin:
             self.ax.set_xlabel("Crr", fontsize=14)
             self.ax.set_ylabel("Top Speed (km/h)", fontsize=14)
             self.ax.grid(True, linestyle='--', alpha=0.7)
+            self._mark_current_param_1d(crr_values, base_crr, top_speeds, "Crr")
 
         elif graph_type == "Effect of CdA & Crr on Top Speed":
             top_speed_map = np.full((len(crr_values), len(cda_values)), np.nan, dtype=float)
@@ -292,6 +346,7 @@ class ParametricMixin:
                 cda_values, crr_values, top_speed_map,
                 title="Effect of CdA & Crr on Top Speed",
                 cbar_label="Top Speed (km/h)",
+                current_cda=base_cda, current_crr=base_crr,
             )
 
         elif graph_type == "Effect of CdA on Acceleration Time":
@@ -312,6 +367,7 @@ class ParametricMixin:
             self.ax.set_xlabel("CdA (m^2)", fontsize=14)
             self.ax.set_ylabel("Acceleration Time (s)", fontsize=14)
             self.ax.grid(True, linestyle='--', alpha=0.7)
+            self._mark_current_param_1d(cda_values, base_cda, accel_times, "CdA")
 
         elif graph_type == "Effect of Crr on Acceleration Time":
             accel_times = [
@@ -331,6 +387,7 @@ class ParametricMixin:
             self.ax.set_xlabel("Crr", fontsize=14)
             self.ax.set_ylabel("Acceleration Time (s)", fontsize=14)
             self.ax.grid(True, linestyle='--', alpha=0.7)
+            self._mark_current_param_1d(crr_values, base_crr, accel_times, "Crr")
 
         elif graph_type == "Effect of CdA & Crr on Acceleration Time":
             accel_time_map = np.full((len(crr_values), len(cda_values)), np.nan, dtype=float)
@@ -349,6 +406,7 @@ class ParametricMixin:
                 cda_values, crr_values, accel_time_map,
                 title=f"Effect of CdA & Crr on 0-{accel_target_speed:.0f} km/h Time",
                 cbar_label="Acceleration Time (s)",
+                current_cda=base_cda, current_crr=base_crr,
             )
 
         elif graph_type == "Effect of CdA on Max Gradability":
@@ -369,6 +427,7 @@ class ParametricMixin:
             self.ax.set_xlabel("CdA (m^2)", fontsize=14)
             self.ax.set_ylabel("Max Gradability (%)", fontsize=14)
             self.ax.grid(True, linestyle='--', alpha=0.7)
+            self._mark_current_param_1d(cda_values, base_cda, max_gradabilities, "CdA")
 
         elif graph_type == "Effect of Crr on Max Gradability":
             max_gradabilities = [
@@ -388,6 +447,7 @@ class ParametricMixin:
             self.ax.set_xlabel("Crr", fontsize=14)
             self.ax.set_ylabel("Max Gradability (%)", fontsize=14)
             self.ax.grid(True, linestyle='--', alpha=0.7)
+            self._mark_current_param_1d(crr_values, base_crr, max_gradabilities, "Crr")
 
         else:
             gradability_map = np.zeros((len(crr_values), len(cda_values)))
@@ -406,6 +466,7 @@ class ParametricMixin:
                 cda_values, crr_values, gradability_map,
                 title="Effect of CdA & Crr on Max Gradability",
                 cbar_label="Max Gradability (%)",
+                current_cda=base_cda, current_crr=base_crr,
             )
 
         self.canvas.draw()

@@ -702,6 +702,13 @@ class TorqueSpeedApp(
         )
         self.plot_eff_diff_button.pack(fill="x", padx=16, pady=(2, 2))
 
+        self.plot_eff_regen_button = ctk.CTkButton(
+            plot_eff_map_frame,
+            text="Plot Regen (Braking) Efficiency Map",
+            command=self.plot_efficiency_map_regen
+        )
+        self.plot_eff_regen_button.pack(fill="x", padx=16, pady=(2, 2))
+
         self.compute_dce_button = ctk.CTkButton(
             plot_eff_map_frame,
             text="Compute Drive Cycle Efficiency",
@@ -762,11 +769,11 @@ class TorqueSpeedApp(
         torque_row.pack(fill="x", pady=(8, 2), padx=8)
         self.torque_radio = ctk.CTkRadioButton(
             torque_row, text="Compare Torque Plot", variable=self.compare_std_plot_var, value="torque",
-            command=self.update_compare_std_plot
+            command=self.update_plot
         )
         self.torque_radio.pack(side="left", padx=(0, 8))
         self.torque_compare_mode = ctk.CTkComboBox(
-            torque_row, values=["Wheel", "Motor"], width=100
+            torque_row, values=["Wheel", "Motor"], width=100, command=self.update_plot
         )
         self.torque_compare_mode.set("Wheel")
         self.torque_compare_mode.pack(side="left", padx=(0, 8))
@@ -776,7 +783,7 @@ class TorqueSpeedApp(
         force_row.pack(fill="x", pady=(2, 2), padx=8)
         self.force_radio = ctk.CTkRadioButton(
             force_row, text="Compare Force Plot", variable=self.compare_std_plot_var, value="force",
-            command=self.update_compare_std_plot
+            command=self.update_plot
         )
         self.force_radio.pack(side="left", padx=(0, 8))
 
@@ -785,9 +792,20 @@ class TorqueSpeedApp(
         accel_row.pack(fill="x", pady=(2, 2), padx=8)
         self.accel_radio = ctk.CTkRadioButton(
             accel_row, text="Compare Acceleration Plot", variable=self.compare_std_plot_var, value="acceleration",
-            command=self.update_compare_std_plot
+            command=self.update_plot
         )
         self.accel_radio.pack(side="left", padx=(0, 8))
+
+        # Efficiency row: radio only -- compares the currently loaded Motor
+        # efficiency map (Efficiency Maps section, below) against whichever
+        # saved standard motor (below) was stored with its own map.
+        eff_row = ctk.CTkFrame(compare_frame, fg_color="transparent")
+        eff_row.pack(fill="x", pady=(2, 2), padx=8)
+        self.compare_eff_radio = ctk.CTkRadioButton(
+            eff_row, text="Compare Efficiency Map", variable=self.compare_std_plot_var, value="efficiency",
+            command=self.update_plot
+        )
+        self.compare_eff_radio.pack(side="left", padx=(0, 8))
         # Button to choose std motors
         self.choose_std_motor_btn = ctk.CTkButton(
             compare_frame, text="Choose Std Motors", command=self.choose_std_motor_popup
@@ -798,7 +816,7 @@ class TorqueSpeedApp(
         self.std_motor_table_frame = ctk.CTkFrame(compare_frame, fg_color=COLORS['section_bg'])
         self.std_motor_table_frame.pack(fill="x", pady=(8, 2), padx=8)
         self.std_motor_table_rows = []
-        self.selected_std_motors = []  # List of dicts: {name, gear_ratio, wheel_radius}
+        self.selected_std_motors = []  # List of dicts: {name, gear_ratio, wheel_radius, eff_map}
         
         self.save_std_motor_btn = ctk.CTkButton(
             compare_frame, text="Save Motor Data", command=self.save_std_motor_data_popup
@@ -818,14 +836,14 @@ class TorqueSpeedApp(
             "Engine analysis": ['vehicle', 'dynamics', 'motor', 'env', 'engine_analysis', 'graph_settings'],
             "Drive Cycle Efficiency": ['drivecycle_data','efficiency_data','motor_input_params','plot_efficiency_map', 'graph_settings'],
             "Drive Cycle": ['drivecycle_data','drive_cycle','plotting_data', 'vehicle', 'dynamics', 'motor', 'graph_settings'],
-            "Compare Standard Motor Data": ['compare_std'],
+            "Compare Standard Motor Data": ['compare_std', 'vehicle', 'dynamics', 'motor', 'sim', 'env', 'graph_settings'],
             # Flow: Analysis Type (above) -> Input Data (drive cycle, then the
             # Motor/Controller efficiency maps) -> Range plot view (foldable list)
             # -> Battery Inputs (now also holds regen cap + energy integration,
             # right below the plot view) -> remaining physics inputs.
             "Range analysis": ['drivecycle_data', 'efficiency_data', 'range_plot', 'range_battery', 'range_efficiency', 'vehicle', 'dynamics', 'motor', 'env'],
             # Pure d-q machine analysis: needs only its own motor-model inputs.
-            "MTPA / MTPV (PMSM)": ['mtpa_mtpv'],
+            "MTPA / MTPV (PMSM)": ['mtpa_mtpv', 'graph_settings'],
         }
         # The Motor/Controller efficiency maps are a single source of truth reused
         # everywhere (Drive Cycle Efficiency, Range, ...), so surface the upload
