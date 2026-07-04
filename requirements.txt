@@ -1,0 +1,16 @@
+# Requirements for Vehicle ↔ Motor Integration Suite
+# Tested with Python 3.14
+customtkinter
+matplotlib
+numpy
+pandas
+scipy
+seaborn
+Pillow
+openpyxl
+
+# Assistant sidebar (local LLM via Ollama + local RAG index)
+requests
+chromadb
+pypdf
+python-docx
