@@ -218,58 +218,51 @@ class EfficiencyMixin:
 
     def _motor_capability_mask(self, torque_grid, rpm_grid, motor=1):
         """Boolean mask (same shape as the grids): True where (torque, rpm) is
-        inside the motor's actual operating envelope, False elsewhere.
+        an acceptable operating point of the motor's torque-speed curve,
+        False elsewhere (those cells are blanked before contouring).
 
-        Envelope = constant peak torque up to rated (base) speed, then power-
-        limited (T = P/omega) out to max speed; nothing beyond max speed.
-        Symmetric in torque, so it covers braking/regen the same as motoring.
-        The controller/combined/difference views use this same motor envelope
-        too: the controller can't drive the shaft past what the motor itself
-        can reach, since they share the same shaft speed.
+        Acceptance rule (exactly the torque-speed-curve check):
+          base RPM = peak power / peak torque, in proper units:
+                     omega_base = P_peak[W] / T_peak[Nm]  (rad/s) -> RPM
+          * RPM <= base RPM: acceptable iff |T| <= peak torque
+          * RPM  > base RPM: compute the point's power P = |T| * omega;
+                             acceptable iff P <= peak power
+        Peak torque / peak power come from the Motor (map axes) or Controller
+        input fields via get_motor_params(). Symmetric in torque so regen is
+        treated the same as motoring.
 
-        Returns None (meaning "don't mask") if the Motor Input Parameters
-        (Max Speed / Rated Speed / Max Torque / Max Power) aren't filled in or
-        aren't valid yet, so a map still displays in full before those fields
-        are populated.
-
-        If a motor torque-speed curve has been uploaded (motor_dataframe), the
-        UPLOADED curve is the envelope: a point is kept iff its |torque| is at
-        or below the curve at that RPM (and within the curve's speed range).
-        That is exactly "reject only points outside the motor's torque-speed
-        curve" -- no parametric approximation.
+        Returns None (meaning "don't mask") if peak torque / peak power aren't
+        filled in or aren't valid yet, so a map still displays in full before
+        those fields are populated.
         """
+        # Only peak torque and peak power are needed -- read them directly so
+        # a blank Max/Rated Speed field can't disable the mask.
+        try:
+            if motor == 1:
+                peak_torque = float(self.motor1_max_torque.get())
+                peak_power_kw = float(self.motor1_max_power.get())
+            else:
+                peak_torque = float(self.motor2_max_torque.get())
+                peak_power_kw = float(self.motor2_max_power.get())
+        except Exception:
+            return None
+        if peak_torque <= 0 or peak_power_kw <= 0:
+            return None
+
         rpm_abs = np.abs(np.asarray(rpm_grid, dtype=float))
         tq_abs = np.abs(np.asarray(torque_grid, dtype=float))
 
-        # Preferred envelope: the actual uploaded motor curve.
-        mdf = getattr(self, "motor_dataframe", None)
-        if mdf is not None:
-            try:
-                df_sorted = mdf.sort_values("motor_speed")
-                curve_rpm = df_sorted["motor_speed"].to_numpy(dtype=float)
-                curve_tq = df_sorted["motor_torque"].to_numpy(dtype=float)
-                if curve_rpm.size >= 2:
-                    cap = np.interp(rpm_abs, curve_rpm, curve_tq,
-                                    left=curve_tq[0], right=0.0)
-                    return tq_abs <= cap + 1e-9
-            except Exception:
-                pass  # fall through to the parametric envelope
+        peak_power_w = peak_power_kw * 1000.0
+        omega = rpm_abs * 2.0 * np.pi / 60.0                      # rad/s
+        base_rpm = (peak_power_w / peak_torque) * 60.0 / (2.0 * np.pi)
 
-        try:
-            max_speed, rated_speed, max_torque, max_power = self.get_motor_params(motor)
-        except Exception:
-            return None
-        if max_torque <= 0 or max_speed <= 0 or max_power <= 0:
-            return None
-        if rated_speed <= 0 or rated_speed > max_speed:
-            rated_speed = max_speed
-
-        omega = np.maximum(rpm_abs, 1e-6) * 2.0 * np.pi / 60.0
-        power_w = max_power * 1000.0
-        cap = np.where(rpm_abs <= rated_speed, max_torque, power_w / omega)
-        cap = np.minimum(cap, max_torque)
-        cap = np.where(rpm_abs <= max_speed, cap, 0.0)
-        return tq_abs <= cap + 1e-9
+        point_power_w = tq_abs * omega
+        acceptable = np.where(
+            rpm_abs <= base_rpm,
+            tq_abs <= peak_torque + 1e-9,          # constant-torque region
+            point_power_w <= peak_power_w + 1e-6,  # power-limited region
+        )
+        return acceptable
 
     def _plot_range_efficiency_map_panel(
         self,
