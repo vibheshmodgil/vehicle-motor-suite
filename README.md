@@ -23,6 +23,10 @@ It runs entirely on your own computer. Your data never leaves your machine.
 - **Engine analysis** — multi-gear IC engine torque/force at the wheel, for comparison
 - **Compare standard motors** — overlay a saved library of reference motors
 - **Range analysis** — battery pack model → power, energy, C-rate, losses, and range over a cycle
+- **MTPA / MTPV (PMSM)** — d-q model analysis of a PM synchronous motor:
+  torque–speed envelope with MTPA / flux-weakening / MTPV regions, power
+  curve, id–iq current trajectory with the current circle and voltage
+  ellipses, and base-speed / corner-power / characteristic-current results
 - **Assistant sidebar** — an optional local AI chat assistant that can answer
   questions about your results using your own reference documents (fully
   local, no data sent to the cloud)

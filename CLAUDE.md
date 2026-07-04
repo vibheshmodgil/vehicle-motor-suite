@@ -180,6 +180,7 @@ vmi/app.py
 | `engine.py` | `EngineMixin` | IC-engine multi-gear analysis, gear-efficiency interpolation, sync engine curve into motor inputs. |
 | `efficiency.py` | `EfficiencyMixin` | Efficiency-map reading/normalizing/interpolation, Motor 1/2 maps, difference map, drive-cycle overlay. |
 | `range_analysis.py` | `RangeAnalysisMixin` | `plot_power_energy_cycle()` — the full battery/range model and its multi-panel plot. |
+| `mtpa_mtpv.py` | `MtpaMtpvMixin` + `solve_mtpa_mtpv()` | "MTPA / MTPV (PMSM)" analysis: pure d-q solver (module function, tested in tests/test_mtpa_mtpv.py) + input section + 4 plot views. Short-circuits in `dispatch.plot_graph` before vehicle-input parsing (like Range). Model per `knowledge_base/scenarios/MTPA_MTPV.pdf`; stator resistance neglected. Region classification is geometric (MTPV = optimum detached from the current circle), not torque-comparison. |
 | `compare_std.py` | `CompareStdMixin` | Standard-motor comparison table + overlay plotting. |
 | `data_io.py` | `DataIOMixin` | All Excel/JSON load/save + the column-picker popups + delete handlers. |
 | `downloads.py` | `DownloadsMixin` | Save current figure / export torque-speed data to Excel. |

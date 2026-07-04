@@ -23,6 +23,13 @@ class DispatchMixin:
         """Updates the plot based on the selected toggle state"""
         self.clear_axes()
 
+        # MTPA/MTPV is a pure d-q machine analysis -- it has its own inputs
+        # and doesn't use the vehicle/Crr/CdA model, so branch before the
+        # generic input parsing (same pattern as Range analysis below).
+        if self.plot_mode == "MTPA / MTPV (PMSM)":
+            self.plot_mtpa_mtpv()
+            return
+
         # Retrieve user inputs. parse_float red-borders every bad field and
         # collects all messages, so the user sees everything wrong at once in
         # the status bar instead of one modal per field.

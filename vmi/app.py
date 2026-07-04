@@ -30,11 +30,13 @@ from .dispatch import DispatchMixin
 from .enhancements import EnhancementsMixin
 from .graph_settings import GraphSettingsMixin
 from .assistant import AssistantMixin
+from .mtpa_mtpv import MtpaMtpvMixin
 
 
 class TorqueSpeedApp(
     EnhancementsMixin, GraphSettingsMixin, AssistantMixin,
     HelpersMixin, LimitsMixin, TorqueForceMixin, ParametricMixin, DriveCycleMixin, EngineMixin, EfficiencyMixin, RangeAnalysisMixin, CompareStdMixin, DataIOMixin, DownloadsMixin, DispatchMixin,
+    MtpaMtpvMixin,
     ctk.CTk,
 ):
     def __init__(self):
@@ -137,6 +139,7 @@ class TorqueSpeedApp(
                 "Compare Standard Motor Data",
                 "Engine analysis",
                 "Range analysis",
+                "MTPA / MTPV (PMSM)",
             ],
             command=self.update_plot,
             font=("Segoe UI", 12),
@@ -323,6 +326,9 @@ class TorqueSpeedApp(
 
         # --- Engine Analysis Section (built in its own method) ---
         self._build_engine_analysis_section(input_frame)
+
+        # --- MTPA / MTPV Section (built in its own method) ---
+        self._build_mtpa_mtpv_section(input_frame)
 
         # --- Motor Curve Upload Section ---
         # NB: despite the key name, in Drive Cycle mode this section hosts the
@@ -818,6 +824,8 @@ class TorqueSpeedApp(
             # -> Battery Inputs (now also holds regen cap + energy integration,
             # right below the plot view) -> remaining physics inputs.
             "Range analysis": ['drivecycle_data', 'efficiency_data', 'range_plot', 'range_battery', 'range_efficiency', 'vehicle', 'dynamics', 'motor', 'env'],
+            # Pure d-q machine analysis: needs only its own motor-model inputs.
+            "MTPA / MTPV (PMSM)": ['mtpa_mtpv'],
         }
         # The Motor/Controller efficiency maps are a single source of truth reused
         # everywhere (Drive Cycle Efficiency, Range, ...), so surface the upload
@@ -825,6 +833,8 @@ class TorqueSpeedApp(
         # adds one header, not clutter. Inserted just before the Graph Settings
         # panel when present, else appended.
         for _name, _secs in self.analysis_sections.items():
+            if _name == "MTPA / MTPV (PMSM)":
+                continue  # pure d-q analysis; efficiency maps are irrelevant
             if 'efficiency_data' not in _secs:
                 if 'graph_settings' in _secs:
                     _secs.insert(_secs.index('graph_settings'), 'efficiency_data')
