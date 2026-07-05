@@ -14,6 +14,7 @@ from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
 from .physics import calculate_crr_cd_a, df, g
+from .calc_ext import cap_torque_to_power
 
 
 
@@ -150,6 +151,13 @@ class TorqueForceMixin:
         rated_torque_motor = peak_torque / ratio
         continuous_torque_curve = np.minimum(rated_torque_motor, continuous_power_w / motor_omega)
 
+        # Battery DC limit (optional): the battery can't deliver more than
+        # Vdc*Idc*eta of shaft power, so both curves are clipped to T <= P_cap/w.
+        # No battery fields entered -> cap is None and the curves are untouched.
+        batt_cap_w = self.get_battery_power_cap_w()
+        peak_torque_curve = cap_torque_to_power(peak_torque_curve, motor_omega, batt_cap_w)
+        continuous_torque_curve = cap_torque_to_power(continuous_torque_curve, motor_omega, batt_cap_w)
+
         df_motor = pd.DataFrame({
             "speeds_rpm_motor": speeds_rpm_motor,
             "speeds_kmh_motor": speeds_kmh_motor,
@@ -206,6 +214,11 @@ class TorqueForceMixin:
                     motor_rpm_for_interp = x * 60 / (2 * np.pi * wheel_radius) / 3.6 * gear_ratio
 
                 y = np.interp(motor_rpm_for_interp, df_sorted["motor_speed"], df_sorted["motor_torque"])
+                # The uploaded curve is battery-capped too (T <= P_cap/w); the
+                # continuous curve below inherits the cap via the division.
+                y = cap_torque_to_power(
+                    y, np.maximum(np.asarray(motor_rpm_for_interp, dtype=float) * 2 * np.pi / 60, 1e-6),
+                    batt_cap_w)
                 # Rated/continuous from the UPLOADED curve / ratio -- the Excel
                 # peak curve replaces the theoretical one, so the manual Peak
                 # Torque entry must not drive the continuous curve (it made
@@ -239,7 +252,12 @@ class TorqueForceMixin:
                     x_label = "Wheel Speed (km/h)"
                     motor_rpm = x * 60 / (2 * np.pi * wheel_radius) / 3.6 * gear_ratio
 
-                y = np.interp(motor_rpm, df_sorted["motor_speed"], df_sorted["motor_torque"]) * wheel_drive_scale
+                y_motor_curve = np.interp(motor_rpm, df_sorted["motor_speed"], df_sorted["motor_torque"])
+                # Battery cap is applied at the motor shaft, then scaled to the wheel.
+                y_motor_curve = cap_torque_to_power(
+                    y_motor_curve, np.maximum(np.asarray(motor_rpm, dtype=float) * 2 * np.pi / 60, 1e-6),
+                    batt_cap_w)
+                y = y_motor_curve * wheel_drive_scale
                 # Same fix as the At-Motor branch: continuous = uploaded peak
                 # curve / ratio (already scaled to the wheel here).
                 y_cont = y / ratio
@@ -421,6 +439,12 @@ class TorqueForceMixin:
             rated_torque_motor = peak_torque / ratio
             continuous_motor_torque_curve = np.minimum(rated_torque_motor, continuous_power_w / motor_omega)
 
+        # Battery DC limit (optional): both curves clipped to T <= P_cap/w at
+        # the motor shaft before scaling to the wheel. None -> untouched.
+        batt_cap_w = self.get_battery_power_cap_w()
+        peak_motor_torque_curve = cap_torque_to_power(peak_motor_torque_curve, motor_omega, batt_cap_w)
+        continuous_motor_torque_curve = cap_torque_to_power(continuous_motor_torque_curve, motor_omega, batt_cap_w)
+
         peak_wheel_torque_curve = peak_motor_torque_curve * wheel_drive_scale
         continuous_wheel_torque_curve = continuous_motor_torque_curve * wheel_drive_scale
         peak_force_curve = peak_wheel_torque_curve / wheel_radius
@@ -573,6 +597,11 @@ class TorqueForceMixin:
                 peak_power_w / ((speeds_rpm * 2 * np.pi) / 60)  # T = P / Ï‰
             )
 
+        # Battery DC limit (optional): available torque clipped to T <= P_cap/w.
+        torque_values = cap_torque_to_power(
+            torque_values, np.maximum(speeds_rpm * 2 * np.pi / 60, 1e-6),
+            self.get_battery_power_cap_w())
+
         # Calculate max wheel force (includes gear efficiency)
         gear_eff = self.get_gear_efficiency_value()
         max_wheel_force = np.array(torque_values * gear_ratio * gear_eff / wheel_radius)
@@ -586,8 +615,11 @@ class TorqueForceMixin:
         ])
         net_force = max_wheel_force - wheel_forces  # Available force for acceleration
 
-        # Compute maximum acceleration
-        max_acceleration = net_force / params['m_i']
+        # Compute maximum acceleration. Wheel rotational inertia adds J/r^2 of
+        # translational-equivalent mass to the inertial term only (the
+        # resistive forces above keep the actual mass). J=0 -> unchanged.
+        inertial_mass = self.get_effective_inertial_mass(params['m_i'], wheel_radius)
+        max_acceleration = net_force / inertial_mass
 
         dt = 0.001  # seconds
         max_time = float(self.max_time.get())  # Maximum simulation time in seconds

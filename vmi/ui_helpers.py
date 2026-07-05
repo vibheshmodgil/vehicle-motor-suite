@@ -14,6 +14,7 @@ from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
 from .physics import calculate_crr_cd_a, df, g
+from .calc_ext import battery_power_cap_w, effective_mass
 from .applog import logger
 
 
@@ -506,6 +507,47 @@ class HelpersMixin:
         if not 0 <= value_num <= 1:
             value_num = 1.0
         return value_num
+
+
+    def get_battery_power_cap_w(self):
+        """Mechanical shaft-power cap (W) from the Battery DC Limit fields,
+        or None when either field is blank/invalid -> no cap (original
+        behaviour). cap = Vdc * Idc * battery-to-shaft efficiency."""
+        try:
+            v_raw = self.batt_voltage.get().strip()
+            i_raw = self.batt_current_limit.get().strip()
+        except Exception:
+            return None
+        if not v_raw or not i_raw:
+            return None
+        try:
+            eta_raw = self.batt_to_shaft_eff.get().strip()
+            eta = float(eta_raw) if eta_raw else 1.0
+        except Exception:
+            eta = 1.0
+        try:
+            return battery_power_cap_w(float(v_raw), float(i_raw), eta)
+        except Exception:
+            return None
+
+
+    def get_effective_inertial_mass(self, mass_kg, wheel_radius_m=None):
+        """mass + J_wheel/r^2 for the inertial (m*a) terms only. A blank or
+        0 Wheel Inertia field returns the plain mass unchanged. When no
+        radius is passed, the Wheel Radius entry is used."""
+        try:
+            j_raw = self.wheel_inertia.get().strip()
+            j = float(j_raw) if j_raw else 0.0
+        except Exception:
+            j = 0.0
+        if j <= 0:
+            return float(mass_kg)
+        if wheel_radius_m is None:
+            try:
+                wheel_radius_m = float(self.wheel_radius.get())
+            except Exception:
+                return float(mass_kg)
+        return effective_mass(mass_kg, j, wheel_radius_m)
 
 
     def on_mref_change(self, event):

@@ -173,7 +173,9 @@ class RangeAnalysisMixin:
         f_roll = params['m_i'] * g * crr_effective * np.cos(theta) * np.ones_like(speed_mps)
         f_aero = 0.5 * rho * params['CdA'] * (speed_mps ** 2)
         f_grade = params['m_i'] * g * np.sin(theta) * np.ones_like(speed_mps)
-        f_inertia = params['m_i'] * acc
+        # Inertial term uses the wheel-inertia-corrected mass (m + J/r^2);
+        # the steady-state forces above keep the actual mass. J=0 -> identical.
+        f_inertia = self.get_effective_inertial_mass(params['m_i'], wheel_radius) * acc
 
         f_total = f_roll + f_aero + f_grade + f_inertia
         wheel_torque = f_total * wheel_radius

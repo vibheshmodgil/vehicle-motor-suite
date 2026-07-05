@@ -272,6 +272,14 @@ class EfficiencyMixin:
         tq_abs = np.abs(np.asarray(torque_grid, dtype=float))
 
         peak_power_w = peak_power_kw * 1000.0
+        # Battery DC limit (optional): the shaft can never see more than
+        # Vdc*Idc*eta regardless of the motor rating, so the power-limited
+        # region of the acceptance rule uses the smaller of the two. Blank
+        # battery fields -> cap None -> rule unchanged (golden-locked).
+        _cap_fn = getattr(self, "get_battery_power_cap_w", None)
+        batt_cap_w = _cap_fn() if callable(_cap_fn) else None
+        if batt_cap_w is not None:
+            peak_power_w = min(peak_power_w, float(batt_cap_w))
         omega = rpm_abs * 2.0 * np.pi / 60.0                      # rad/s
         base_rpm = (peak_power_w / peak_torque) * 60.0 / (2.0 * np.pi)
 
@@ -308,6 +316,12 @@ class EfficiencyMixin:
         try:
             xlims, ylims = ax.get_xlim(), ax.get_ylim()
             peak_power_w = peak_power_kw * 1000.0
+            # Same battery-DC-limit substitution as _motor_capability_mask,
+            # so the drawn envelope stays the exact boundary of the mask.
+            _cap_fn = getattr(self, "get_battery_power_cap_w", None)
+            batt_cap_w = _cap_fn() if callable(_cap_fn) else None
+            if batt_cap_w is not None:
+                peak_power_w = min(peak_power_w, float(batt_cap_w))
             base_rpm = (peak_power_w / peak_torque) * 60.0 / (2.0 * np.pi)
             rpm_end = max(xlims[1], base_rpm)
             rpm_flat = np.array([max(xlims[0], 0.0), min(base_rpm, rpm_end)])
@@ -759,7 +773,9 @@ class EfficiencyMixin:
         f_roll = params['m_i'] * g * params['Crr'] * np.cos(theta) * np.ones_like(speed_mps)
         f_aero = 0.5 * rho * params['CdA'] * (speed_mps ** 2)
         f_grade = params['m_i'] * g * np.sin(theta) * np.ones_like(speed_mps)
-        f_inertia = params['m_i'] * acc
+        # Inertial term uses the wheel-inertia-corrected mass (m + J/r^2);
+        # the steady-state forces above keep the actual mass. J=0 -> identical.
+        f_inertia = self.get_effective_inertial_mass(params['m_i'], wheel_radius) * acc
         f_total = f_roll + f_aero + f_grade + f_inertia
 
         wheel_torque = f_total * wheel_radius

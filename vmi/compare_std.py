@@ -15,6 +15,7 @@ from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
 from .physics import calculate_crr_cd_a, df, g
+from .calc_ext import cap_torque_to_power
 
 
 
@@ -151,6 +152,10 @@ class CompareStdMixin:
                 speeds, params, wheel_radius, peak_torque, peak_power, gear_ratio
             )
         # y_data_list = []
+        # Battery DC limit (optional): the battery is a property of the
+        # VEHICLE, so the same shaft-power cap clips every saved motor's
+        # curve too, not just the current motor's. None -> untouched.
+        batt_cap_w = self.get_battery_power_cap_w()
         for entry in self.selected_std_motors:
             name = entry["name"]
             std_gear_ratio = float(entry["gear_ratio"])
@@ -167,12 +172,13 @@ class CompareStdMixin:
             if plot_type == "torque":
                 
                 # Plot torque vs speed (at wheel or motor)
+                interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
+                interp_torque = cap_torque_to_power(
+                    interp_torque, np.maximum(speeds_rpm_motor * 2 * np.pi / 60, 1e-6), batt_cap_w)
                 if mode == "Wheel":
-                    interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
                     y = interp_torque * std_gear_ratio * gear_eff
                     label = f"{name} (Wheel)"
                 else:
-                    interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
                     y = interp_torque
                     label = f"{name} (Motor)"
                 y_data_list.append(y)   
@@ -207,6 +213,8 @@ class CompareStdMixin:
             elif plot_type == "force":
                 # F = (torque * gear_ratio) / wheel_radius
                 interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
+                interp_torque = cap_torque_to_power(
+                    interp_torque, np.maximum(speeds_rpm_motor * 2 * np.pi / 60, 1e-6), batt_cap_w)
                 force = (interp_torque * std_gear_ratio * gear_eff) / wheel_radius
                 y=force
                 y_data_list.append(y)
@@ -222,6 +230,8 @@ class CompareStdMixin:
                 speeds_rpm_wheel = speeds_mps * 60 / (2 * np.pi * std_wheel_radius)
                 speeds_rpm_motor = speeds_rpm_wheel * std_gear_ratio
                 interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
+                interp_torque = cap_torque_to_power(
+                    interp_torque, np.maximum(speeds_rpm_motor * 2 * np.pi / 60, 1e-6), batt_cap_w)
                 max_wheel_force = interp_torque * std_gear_ratio * gear_eff / std_wheel_radius
                 wheel_forces = np.array([
                     params['m_i'] * g * params['Crr'] +
@@ -230,7 +240,8 @@ class CompareStdMixin:
                     for s in speeds_mps
                 ])
                 net_force = max_wheel_force - wheel_forces
-                max_acceleration = net_force / params['m_i']
+                # Wheel rotational inertia (J/r^2) slows the m*a term only.
+                max_acceleration = net_force / self.get_effective_inertial_mass(params['m_i'], std_wheel_radius)
                 dt = 0.01
                 max_time = float(self.max_time.get())
                 time_steps = np.arange(0, max_time, dt)

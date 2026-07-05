@@ -371,6 +371,32 @@ app — treat writes carefully.
   dependent rolling resistance (`crr1`), trapezoidal vs rectangular energy
   integration, and a regen power cap. The UI defaults reproduce the original
   model exactly; keep that property — advanced features must be no-ops when off.
+- **Battery DC limit + wheel inertia (2026-07, same no-op contract).** Two
+  optional physics effects, pure helpers in `calc_ext.py`
+  (`battery_power_cap_w`, `cap_torque_to_power`, `effective_mass`,
+  golden-locked in `tests/test_battery_wheel_inertia.py`), read via
+  `HelpersMixin.get_battery_power_cap_w()` / `get_effective_inertial_mass()`:
+  - **Battery DC limit** (`batt_voltage`, `batt_current_limit`,
+    `batt_to_shaft_eff` entries in the Motor section; blank V or I = no cap):
+    shaft power is capped at Vdc·Idc·η, clipping T ≤ P_cap/ω on **every
+    capability curve** — `plot_torque_graph` (theoretical + uploaded, both
+    parts), `plot_force_graph`, `plot_vehicle_max_speed_vs_time`,
+    `parametric._compute_available_wheel_force` (so top speed / accel /
+    gradability sweeps all see it), Compare Std's saved-motor overlays (the
+    battery belongs to the *vehicle*, so it caps every motor compared), and
+    the efficiency-map envelope (`_motor_capability_mask` +
+    `_draw_motor_capability_curve`, guarded with `getattr` because the test
+    host is `EfficiencyMixin`-only). Drive-cycle/Range *demand* curves are
+    deliberately NOT clipped — demand is demand; the cap limits capability.
+  - **Wheel inertia** (`wheel_inertia` entry in Vehicle Parameters, kg·m²
+    total, default 0): m_eff = m + J/r² is used in the **inertial (m·a)
+    terms only** — acceleration sims (`plot_vehicle_max_speed_vs_time`,
+    `_estimate_acceleration_time`, Compare Std accel), and the f_inertia
+    term in `drive_cycle`, `efficiency._drive_cycle_operating_points`, and
+    `range_analysis`. Rolling/gradient forces keep the actual mass;
+    steady-state results (top speed, gradability) are unaffected by design.
+  Both fields persist automatically (scenario/session collection scans every
+  `CTkEntry`) and appear in the report's core-inputs table.
 ---
 
 ## 7. Conventions to follow when editing

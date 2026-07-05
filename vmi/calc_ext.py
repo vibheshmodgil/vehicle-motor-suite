@@ -12,6 +12,11 @@ exactly:
     * trapz_energy_wh is only used when the user selects trapezoidal
       integration; the default remains the original cumulative-sum method.
     * apply_regen_cap is a no-op when cap_w is None (the default).
+    * battery_power_cap_w returns None (no cap) when the battery voltage or
+      DC current limit field is blank/invalid, and cap_torque_to_power is a
+      strict no-op when cap_w is None.
+    * effective_mass returns the plain mass unchanged when the wheel inertia
+      is 0 (the default) or the radius is missing.
 
 Nothing in physics.py was modified; the verbatim calculation core is untouched.
 """
@@ -78,6 +83,62 @@ def apply_regen_cap(regen_power_w, cap_w=None):
     if cap_w is None:
         return regen_power_w
     return np.clip(regen_power_w, 0.0, float(cap_w))
+
+
+def battery_power_cap_w(voltage_v=None, current_a=None, eta=1.0):
+    """Mechanical shaft-power cap implied by a battery DC current limit, in W.
+
+    cap = Vdc * Idc * eta, where eta is the battery-to-shaft efficiency
+    (controller x motor chain). Returns None (meaning "no cap") when either
+    the voltage or the current limit is missing or non-positive, so blank
+    battery fields reproduce the original unrestricted behaviour exactly.
+    """
+    try:
+        v = float(voltage_v)
+        i = float(current_a)
+    except (TypeError, ValueError):
+        return None
+    if v <= 0 or i <= 0:
+        return None
+    try:
+        e = float(eta)
+    except (TypeError, ValueError):
+        e = 1.0
+    if not 0.0 < e <= 1.0:
+        e = 1.0
+    return v * i * e
+
+
+def cap_torque_to_power(torque_nm, omega_rad_s, cap_w=None):
+    """Clip a torque curve so |T| * omega never exceeds cap_w.
+
+    Sign-preserving, so a regen (negative) torque is clipped symmetrically.
+    cap_w=None (default) returns the input unchanged -- a strict no-op.
+    """
+    torque_nm = np.asarray(torque_nm, dtype=float)
+    if cap_w is None:
+        return torque_nm
+    omega = np.maximum(np.abs(np.asarray(omega_rad_s, dtype=float)), 1e-9)
+    limit = float(cap_w) / omega
+    return np.clip(torque_nm, -limit, limit)
+
+
+def effective_mass(mass_kg, wheel_inertia_kgm2=0.0, wheel_radius_m=None):
+    """Translational-equivalent vehicle mass including wheel rotational inertia.
+
+    m_eff = m + J_total / r^2. Only the INERTIAL (m*a) terms use this --
+    rolling/gradient forces keep the actual mass, since spinning wheels don't
+    add weight. J <= 0 (default) or a missing/invalid radius returns the
+    plain mass unchanged.
+    """
+    try:
+        j = float(wheel_inertia_kgm2)
+        r = float(wheel_radius_m)
+    except (TypeError, ValueError):
+        return float(mass_kg)
+    if j <= 0 or r <= 0:
+        return float(mass_kg)
+    return float(mass_kg) + j / (r * r)
 
 
 def check_energy_invariants(metrics):

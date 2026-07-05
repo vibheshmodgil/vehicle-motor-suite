@@ -14,6 +14,7 @@ from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
 from .physics import calculate_crr_cd_a, df, g
+from .calc_ext import cap_torque_to_power
 
 
 
@@ -72,6 +73,10 @@ class ParametricMixin:
                 peak_torque,
                 peak_power_w / motor_omega,
             )
+
+        # Battery DC limit (optional): the available motor torque is clipped
+        # to T <= P_cap/w before scaling to the wheel. None -> untouched.
+        motor_torque = cap_torque_to_power(motor_torque, motor_omega, self.get_battery_power_cap_w())
 
         wheel_torque = motor_torque * gear_ratio * gear_eff
         wheel_force = wheel_torque / wheel_radius
@@ -146,6 +151,9 @@ class ParametricMixin:
         force_grid = np.asarray(wheel_force_curve, dtype=float)
         current_speed_kmh = 0.0
         elapsed_time_s = 0.0
+        # Wheel rotational inertia (J/r^2) only slows the m*a term; the
+        # resistive force below keeps the actual mass. J=0 -> identical.
+        inertial_mass_kg = self.get_effective_inertial_mass(mass_kg)
 
         while elapsed_time_s <= max_time_s:
             if current_speed_kmh >= target_speed_kmh:
@@ -170,7 +178,7 @@ class ParametricMixin:
                 )[0]
             )
             net_force = available_force - resist_force
-            acceleration = net_force / mass_kg
+            acceleration = net_force / inertial_mass_kg
             if acceleration <= 0:
                 return np.nan
 

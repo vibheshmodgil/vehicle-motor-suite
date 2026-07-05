@@ -268,7 +268,9 @@ class DriveCycleMixin:
         df['velocity_m_s'] = df[velocity_col] * (5/18)
         df['acceleration_m_s2'] = df['velocity_m_s'].diff() / df[time_col].diff()
         df['acceleration_m_s2'] = df['acceleration_m_s2'].fillna(0)
-        df['accelerating_force'] = m * df['acceleration_m_s2']
+        # Wheel rotational inertia adds J/r^2 of translational-equivalent mass
+        # to the inertial term only (rolling/gradient keep the actual mass).
+        df['accelerating_force'] = self.get_effective_inertial_mass(m, radius_m) * df['acceleration_m_s2']
         df['rolling_resistance_force'] = rolling_force(cr, m, angle)
         df['aerodynamic_force'] = [aerodynamics_force(cda, density, v) for v in df['velocity_m_s']]
         df['gradient_force'] = gradient_force(m, angle)

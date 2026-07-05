@@ -249,6 +249,12 @@ class TorqueSpeedApp(
         # Read by Range analysis / Drive Cycle Efficiency; defaults to 0 (no
         # effect) so every other analysis is unchanged unless set.
         self.create_labeled_entry(self.sections['vehicle'], "Crr speed coeff  Crr1 [per m/s]", "0", "crr_speed_coeff")
+        # Total wheel rotational inertia (all wheels combined), reflected as
+        # extra translational mass m_eff = m + J/r^2 in every INERTIAL (m*a)
+        # term: acceleration sim, parametric accel time, drive-cycle / range
+        # inertial force. 0 (default) = original behaviour; steady-state
+        # results (top speed, gradability) are physically unaffected.
+        self.create_labeled_entry(self.sections['vehicle'], "Wheel Inertia J (kg·m², total)", "0", "wheel_inertia")
 
 
         self.sections['dynamics'] = self.create_section(input_frame, "Vehicle Dynamics Inputs (Optional)", "#f1f5f9")
@@ -261,6 +267,13 @@ class TorqueSpeedApp(
         self.create_labeled_entry(self.sections['motor'], "Peak Power (kW)", "2.4", "peak_power")
         self.create_labeled_entry(self.sections['motor'], "Continuous Power (kW)", "1.8", "continuous_power")
         self.create_labeled_entry(self.sections['motor'], "Peak to Rated Torque Ratio", "2", "peak_to_rated_torque_ratio")
+        # Battery DC limit (optional): shaft power is capped at Vdc*Idc*eta
+        # everywhere a motor capability curve is drawn (torque/force/accel,
+        # parametric sweeps, Compare Std overlays, efficiency-map envelope).
+        # Leaving voltage or current blank = no cap (original behaviour).
+        self.create_labeled_entry(self.sections['motor'], "Battery Voltage (V) (optional)", "", "batt_voltage")
+        self.create_labeled_entry(self.sections['motor'], "Battery DC Current Limit (A) (optional)", "", "batt_current_limit")
+        self.create_labeled_entry(self.sections['motor'], "Battery-to-Shaft Efficiency (0-1)", "0.9", "batt_to_shaft_eff")
 
         self.sections['sim'] = self.create_section(input_frame, "Simulation Settings", "#f1f5f9")
         self.xlim_frame=self.create_labeled_entry(self.sections['sim'], "X-axis Limit (kmh,vehicle)"," ", "xlim",return_frame=True)
