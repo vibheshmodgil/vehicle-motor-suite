@@ -30,6 +30,18 @@ class DispatchMixin:
             self.plot_mtpa_mtpv()
             return
 
+        # Mechanical Design is likewise a self-contained hand-calc analysis
+        # with its own inputs (no vehicle/Crr/CdA model).
+        if self.plot_mode == "Mechanical Design (Motor)":
+            self.plot_mechanical_design()
+            return
+
+        # Motor BOM: pure cost/weight breakdown of the BOM tree — also no
+        # vehicle model involved.
+        if self.plot_mode == "Motor BOM (Cost & Weight)":
+            self.plot_motor_bom()
+            return
+
         # Retrieve user inputs. parse_float red-borders every bad field and
         # collects all messages, so the user sees everything wrong at once in
         # the status bar instead of one modal per field.

@@ -12,7 +12,9 @@ import requests
 OLLAMA_URL = "http://localhost:11434"
 CHAT_MODEL = "llama3.1:8b"
 EMBED_MODEL = "nomic-embed-text"
-TIMEOUT_S = 120
+# First chat after Ollama (re)starts must load the 8B model into memory,
+# which alone can take >120 s on CPU-only machines — measured locally.
+TIMEOUT_S = 300
 
 
 class OllamaError(Exception):

@@ -141,6 +141,27 @@ SCHEMA = {
             _f("title_size", "int", "Title font size", 13),
             _f("label_size", "int", "Axis label size", 11),
         ],
+    # Mechanical Design draws a different curve set per Design Check, so per-
+    # line pickers aren't practical -- a shared line width + the universal
+    # grid/legend/font block (defaults mirror the hard-coded look: title 14).
+    "Mechanical Design (Motor)":
+        [_f("line_width", "width", "Line width", "2.0", WIDTH_CHOICES)]
+        + _GRID_FIELDS + [
+            _f("show_legend", "bool", "Show legend", True),
+            _f("legend_loc", "choice", "Legend position", "best", LEGEND_CHOICES),
+            _f("title_size", "int", "Title font size", 14),
+            _f("label_size", "int", "Axis label size", 12),
+        ],
+    # Motor BOM: the sankey view is axis-off (grid/legend don't apply there),
+    # but Pareto and Group Split are ordinary single-axis bar plots and take
+    # the universal grid/legend/font block.
+    "Motor BOM (Cost & Weight)":
+        _GRID_FIELDS + [
+            _f("show_legend", "bool", "Show legend", True),
+            _f("legend_loc", "choice", "Legend position", "lower right", LEGEND_CHOICES),
+            _f("title_size", "int", "Title font size", 14),
+            _f("label_size", "int", "Axis label size", 12),
+        ],
     "Drive Cycle Efficiency": [
         _f("cmap", "choice", "Colormap", "viridis", CMAP_CHOICES),
         _f("fill_levels", "int", "Filled contour levels", 50),

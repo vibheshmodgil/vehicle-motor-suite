@@ -305,6 +305,8 @@ class EnhancementsMixin:
         "Drive Cycle Efficiency": ["drive_cycle_efficiency_label"],
         "Range analysis": ["range_results_label", "drive_cycle_efficiency_label"],
         "MTPA / MTPV (PMSM)": ["mtpa_results_label"],
+        "Mechanical Design (Motor)": ["mech_results_label"],
+        "Motor BOM (Cost & Weight)": ["bom_results_label"],
     }
 
     def generate_report(self):
@@ -463,6 +465,15 @@ class EnhancementsMixin:
             ]
             trs = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in rows)
             return f"<p><strong>Analysis inputs</strong></p><table><tbody>{trs}</tbody></table>"
+        if analysis == "Mechanical Design (Motor)":
+            # Rows come straight from the active Design Check's widgets, so
+            # this stays in sync with whatever check/inputs are selected.
+            try:
+                rows = self._mech_report_input_rows()
+            except Exception:
+                return ""
+            trs = "".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in rows)
+            return f"<p><strong>Analysis inputs</strong></p><table><tbody>{trs}</tbody></table>"
         return ""
 
     def _render_report_views(self, analysis):
@@ -573,6 +584,33 @@ class EnhancementsMixin:
                     self.compare_std_plot_var.set("efficiency")
                     self.update_compare_std_plot()
                     snap("Efficiency Map")
+
+        elif analysis == "Motor BOM (Cost & Weight)":
+            if getattr(self, "bom_tree", None) is None:
+                self.update_plot()
+                snap()
+            else:
+                # Three views cover the story: where the cost goes, where the
+                # weight goes, and the sorted cost drivers. View/metric combos
+                # are snapshotted and restored like the other report widgets.
+                prev = (self.bom_view_combo.get(), self.bom_metric_combo.get())
+                views = [
+                    ("Sankey Diagram", "Cost (₹)", "Sankey - Cost"),
+                    ("Sankey Diagram", "Weight (g)", "Sankey - Weight"),
+                    ("Pareto (Max → Min)", "Cost (₹)", "Pareto - Cost"),
+                ]
+                if getattr(self, "bom_tree_b", None) is not None:
+                    views.append(("Compare A vs B", "Cost (₹)",
+                                  "Compare A vs B - Cost"))
+                try:
+                    for view, met, subtitle in views:
+                        self.bom_view_combo.set(view)
+                        self.bom_metric_combo.set(met)
+                        self.update_plot()
+                        snap(subtitle)
+                finally:
+                    self.bom_view_combo.set(prev[0])
+                    self.bom_metric_combo.set(prev[1])
 
         else:
             # Acceleration, Parametric Study, Engine analysis: no sub-views.
@@ -836,6 +874,14 @@ class EnhancementsMixin:
                  indicator="mtpa_lq_indicator", buttons=["mtpa_lq_delete_button"]),
             dict(name="mtpa_psi_map", attrs=["mtpa_psi_map"], primary="mtpa_psi_map",
                  indicator="mtpa_psi_indicator", buttons=["mtpa_psi_delete_button"]),
+            # Motor BOM: nested plain-dict trees (JSON-safe as-is). A is the
+            # editable baseline; B is the optional compare variant.
+            dict(name="bom_tree", attrs=["bom_tree"], primary="bom_tree",
+                 indicator="bom_indicator",
+                 buttons=["bom_export_button", "bom_delete_button"]),
+            dict(name="bom_tree_b", attrs=["bom_tree_b"], primary="bom_tree_b",
+                 indicator="bom_b_indicator",
+                 buttons=["bom_b_delete_button"]),
         ]
 
     def _set_indicator(self, indicator_name, present, button_names=()):

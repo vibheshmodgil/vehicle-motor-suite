@@ -261,6 +261,10 @@ class HelpersMixin:
                 ("Lq map", have("mtpa_lq_map"), False),
                 ("ψ_PM map", have("mtpa_psi_map"), False),
             ],
+            "Motor BOM (Cost & Weight)": [
+                ("BOM (template / Excel / editor)", have("bom_tree"), True),
+                ("BOM B (for Compare A vs B)", have("bom_tree_b"), False),
+            ],
         }.get(analysis_type, [])
 
         if not needs:

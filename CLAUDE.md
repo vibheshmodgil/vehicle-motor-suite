@@ -237,6 +237,8 @@ vmi/app.py
 | `efficiency.py` | `EfficiencyMixin` | Efficiency-map reading/normalizing/interpolation, Motor 1/2 maps, difference map, drive-cycle overlay. |
 | `range_analysis.py` | `RangeAnalysisMixin` | `plot_power_energy_cycle()` — the full battery/range model and its multi-panel plot. |
 | `mtpa_mtpv.py` | `MtpaMtpvMixin` + `solve_mtpa_mtpv()` | "MTPA / MTPV (PMSM)" analysis: pure d-q solver (module function, tested in tests/test_mtpa_mtpv.py) + input section + 4 plot views. Short-circuits in `dispatch.plot_graph` before vehicle-input parsing (like Range). Model per `knowledge_base/scenarios/MTPA_MTPV.pdf`; stator resistance neglected. Region classification is geometric (MTPV = optimum detached from the current circle), not torque-comparison. Current spec: `phase_peak_current()` converts Line/Phase × RMS/Peak × Star/Delta to the solver's peak phase current; `dc_link_to_vmax()` maps Vdc through the selected PWM scheme (SVPWM Vdc/√3 default, sine Vdc/2, six-step 2Vdc/π). Base speed is analytic (Vmax/(p·\|ψ_MTPA\|)), not the last feasible speed-grid sample. Optional Ld/Lq/ψ_PM saturation maps over an (id×iq) Excel grid (`mtpa_{ld,lq,psi}_map` dicts `{'id','iq','m'}`, mH/mH/Wb, auto-detects H; \|id\| axes accepted) switch the solver to a dense-grid + circle-boundary search; missing maps fall back to the constant entries, no maps = original path (golden-locked). Maps persist via `_dataset_slots()` and show in the data checklist. Graph Settings are applied per panel by `_mtpa_apply_gs` (the "All" view has 4 axes; `apply_graph_style` only handles one). |
+| `mechanical_design.py` | `MechanicalDesignMixin` + pure formula functions | "Mechanical Design (Motor)" analysis (2026-07): five hand-calc design checks from `knowledge_base/standards/EV_Motor_Mechanical_Design_Formula_Handbook.md` (Shigley/Roark/Timoshenko/DIN 7190/ISO 281/ISO 21940-11) — Rotor Stress & Burst Speed, Shaft Design (Static + Fatigue), Press / Shrink Fit, Bearing Life (L10), Critical Speed & Balancing. A "Design Check" combobox swaps between five per-check input subframes (`_mech_sync_subframe`; when the section is collapsed it edits the section's `_vmi_saved` re-pack list instead of packing, and `plot_mechanical_design` re-syncs so session-restored combo values show the right inputs). Each check has one single-axis plot (stress-vs-radius, SF-vs-diameter, pressure-vs-speed with loss-of-contact, life-vs-load, critical-speed-vs-diameter) + a `mech_results_label` numeric summary quoting the handbook's target safety factors. All formula functions are module-level pure functions (SI) golden-locked in tests/test_mechanical_design.py — note `de_goodman_diameter` uses Shigley's real Eq. 7-8 coefficients (sqrt(4(Kf·M)²+3(Kfs·T)²)); the handbook's own §2.5 transcription drops the factor 2 (verified by SF round-trip). Short-circuits in `dispatch.plot_graph` before vehicle-input parsing (like MTPA/Range); no uploads, no `efficiency_data` injection. Report inputs come from `_mech_report_input_rows()` (walks the active subframe's widgets, so it never goes stale). |
+| `bom.py` | `BomMixin` + pure tree/layout helpers | "Motor BOM (Cost & Weight)" analysis (2026-07): ONE nested plain-dict tree `self.bom_tree` (`{name, qty, cost ₹/u, weight g/u, category, active, children[]}`) — nothing architecture-specific is hard-coded, hub vs mid-mount are just different trees. Totals ALWAYS roll up from leaves; `qty` multiplies its whole subtree. Sources: built-in `BOM_TEMPLATES` (Mid-Mount / Hub, placeholder values), Excel import/export (flat rows Assembly \| Sub-assembly \| Part \| Qty \| Unit Cost \| Unit Weight \| Category \| Active; ancestor qty folded into exported Qty so values round-trip exactly; forgiving header matching), and an in-app ttk.Treeview editor (add assembly/part, edit popup, remove — freshly created empty assemblies carry an `asm: True` flag so `_bom_is_assembly` doesn't mistake them for parts). Views (all driven by one Metric combo, Cost/Weight): custom-drawn Sankey (`sankey_layout()` pure function — depth limit + "min branch share %" folds small children into gray "Others" bands per parent; node `value` is passed explicitly, NOT span×total, since spans are gap-shrunk), Pareto max→min with cumulative-% line drawn scaled onto the value axis (deliberately no twin axes — keeps `apply_graph_style`/dark-mode working), Group Split (Top Assembly / Category / Active–Non-active). Sankey is axis-off so it skips `apply_graph_style`; the other views apply it. **Compare mode:** an optional second tree `self.bom_tree_b` (Template → B / Excel → B / Copy A → B; "Swap A ↔ B" exchanges the two so B can be edited — the tree editor always edits A) feeds the "Compare A vs B" view: `compare_groups()` (pure) takes the UNION of group keys sorted by max(a,b) desc, so architecture-only assemblies (hub's Axle vs mid-mount's Front End Cover) show one-sided bars with 0 on the other; deltas annotated green (B lower) / red (B higher). Both trees persist via `_dataset_slots()` (plain dicts — `_enc_obj` recurses them). Report renders Sankey-Cost, Sankey-Weight, Pareto-Cost, plus Compare-Cost when B is loaded. Pure helpers golden-locked in tests/test_bom.py. |
 | `compare_std.py` | `CompareStdMixin` | Standard-motor comparison table + overlay plotting (torque/force/acceleration/efficiency — see §7e). |
 | `data_io.py` | `DataIOMixin` | All Excel/JSON load/save + the column-picker popups + delete handlers. |
 | `downloads.py` | `DownloadsMixin` | Save current figure / export torque-speed data to Excel. |
@@ -369,7 +371,6 @@ app — treat writes carefully.
   dependent rolling resistance (`crr1`), trapezoidal vs rectangular energy
   integration, and a regen power cap. The UI defaults reproduce the original
   model exactly; keep that property — advanced features must be no-ops when off.
-
 ---
 
 ## 7. Conventions to follow when editing
@@ -465,7 +466,10 @@ applies grid/legend/title/label-size to `self.ax` and is called at the end of
   (universal), Drive Cycle (universal + heatmap colormap/weight/opacity/top-N),
   MTPA/MTPV (per-line envelope/power/id/iq/|i_s|, region shading on/off +
   opacity, trajectory marker size, grid/legend/fonts — applied per panel by
-  `_mtpa_apply_gs`, since the "All" view is multi-axis).
+  `_mtpa_apply_gs`, since the "All" view is multi-axis), Mechanical Design
+  (shared line width + universal; single-axis, so plain `apply_graph_style`),
+  Motor BOM (universal block; applies to Pareto/Group Split only — the Sankey
+  view is axis-off and skips it).
 - The universal grid block also exposes **per-axis fixed tick spacing**
   (`grid_x_step` / `grid_y_step`, 0 = auto) applied via `MultipleLocator` in
   `apply_graph_style` (capped at ~1000 ticks). Torque/Force/Acceleration no
@@ -528,6 +532,23 @@ before=self.container, ...)` / `paned.forget(...)`.
 **Everything runs locally through Ollama** (`llm_client.py`,
 `http://localhost:11434`) — no cloud calls. Requires `ollama pull llama3.1:8b`
 (chat) and `ollama pull nomic-embed-text` (embeddings) once, outside the app.
+`TIMEOUT_S = 300`: the first chat after Ollama (re)starts loads the 8B model
+into memory, which alone measured >120 s on this CPU-only machine.
+
+**Persona system prompt (2026-07).** `SYSTEM_PROMPT` in `assistant.py` casts
+the assistant as a senior EV powertrain design engineer (machines, power
+electronics, mechanical, thermal, batteries, standards) with two explicit
+modes: KB context present → answer from it, marking each fact
+`(source: <file>)`; context missing → prefix `"Not in the knowledge base —
+engineering judgment:"` and answer anyway from expertise (the old prompt told
+it to stop when context was missing, which made it useless without data).
+Two things llama3.1:8b needs to follow this reliably, both verified by live
+test: (1) the prompt must NOT contain a concrete example citation with a fake
+filename/number — the model parrots it verbatim as if it were data ("only
+cite file names that literally appear in [brackets]" instead); (2)
+`_chat_worker` restates the citation rule right next to the question (the
+`reminder` suffix, only when retrieval hits exist) — with the rule only in
+the system prompt the model used the data but dropped the source markings.
 
 **Knowledge base** (`rag_store.py`, Chroma `PersistentClient` under
 `knowledge_base/.index/`): indexes everything under `knowledge_base/`
@@ -583,10 +604,14 @@ different widgets:
   at least one motor is selected); Efficiency Map too, if the current session
   has a Motor map loaded *and* the selected motor(s) include a saved one
   (see §7e).
+- **Motor BOM**: Sankey (Cost), Sankey (Weight), Pareto (Cost), and Compare
+  A vs B (Cost) when BOM B is loaded — the BOM view/metric combos are set per
+  snapshot and restored in a `finally`.
 - **Everything else** (Acceleration, Parametric Study, Engine analysis, Range
-  analysis, MTPA/MTPV): one view via plain `update_plot()`. Range and MTPA
-  already default to their "All" multi-panel dashboard, so one view is
-  already comprehensive for those.
+  analysis, MTPA/MTPV, Mechanical Design): one view via plain `update_plot()`.
+  Range and MTPA already default to their "All" multi-panel dashboard, so one
+  view is already comprehensive for those; Mechanical Design reports the
+  currently selected Design Check's plot + inputs.
 
 **Inputs come first.** `_report_core_inputs_html()` builds one table of the
 shared vehicle/motor inputs (mass, Crr/CdA, gear ratio, wheel radius, peak
@@ -594,7 +619,8 @@ torque/power, gradients, ...) — read once and shown at the very top of the
 report (`id="inputs"`, before the table of contents), not repeated per
 section. `_report_analysis_inputs_html(analysis)` adds a second, small inputs
 block for analyses with their own separate input model that the shared table
-doesn't cover (currently just MTPA/MTPV's d-q parameters); it's prepended to
+doesn't cover (MTPA/MTPV's d-q parameters, Mechanical Design's active
+Design-Check widgets via `_mech_report_input_rows()`); it's prepended to
 that analysis's *first* section only.
 
 Per-view numeric summaries still come from `_REPORT_LABEL_ATTRS[analysis]`

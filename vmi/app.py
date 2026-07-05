@@ -31,12 +31,14 @@ from .enhancements import EnhancementsMixin
 from .graph_settings import GraphSettingsMixin
 from .assistant import AssistantMixin
 from .mtpa_mtpv import MtpaMtpvMixin
+from .mechanical_design import MechanicalDesignMixin
+from .bom import BomMixin
 
 
 class TorqueSpeedApp(
     EnhancementsMixin, GraphSettingsMixin, AssistantMixin,
     HelpersMixin, LimitsMixin, TorqueForceMixin, ParametricMixin, DriveCycleMixin, EngineMixin, EfficiencyMixin, RangeAnalysisMixin, CompareStdMixin, DataIOMixin, DownloadsMixin, DispatchMixin,
-    MtpaMtpvMixin,
+    MtpaMtpvMixin, MechanicalDesignMixin, BomMixin,
     ctk.CTk,
 ):
     def __init__(self):
@@ -140,6 +142,8 @@ class TorqueSpeedApp(
                 "Engine analysis",
                 "Range analysis",
                 "MTPA / MTPV (PMSM)",
+                "Mechanical Design (Motor)",
+                "Motor BOM (Cost & Weight)",
             ],
             command=self.update_plot,
             font=("Segoe UI", 12),
@@ -329,6 +333,12 @@ class TorqueSpeedApp(
 
         # --- MTPA / MTPV Section (built in its own method) ---
         self._build_mtpa_mtpv_section(input_frame)
+
+        # --- Mechanical Design Section (built in its own method) ---
+        self._build_mech_design_section(input_frame)
+
+        # --- Motor BOM Section (built in its own method) ---
+        self._build_bom_section(input_frame)
 
         # --- Motor Curve Upload Section ---
         # NB: despite the key name, in Drive Cycle mode this section hosts the
@@ -844,6 +854,12 @@ class TorqueSpeedApp(
             "Range analysis": ['drivecycle_data', 'efficiency_data', 'range_plot', 'range_battery', 'range_efficiency', 'vehicle', 'dynamics', 'motor', 'env'],
             # Pure d-q machine analysis: needs only its own motor-model inputs.
             "MTPA / MTPV (PMSM)": ['mtpa_mtpv', 'graph_settings'],
+            # Pure mechanical hand-calc checks: own inputs only (see
+            # mechanical_design.py; formulas from the EV motor mechanical
+            # design formula handbook).
+            "Mechanical Design (Motor)": ['mech_design', 'graph_settings'],
+            # Hierarchical BOM with its own tree editor + sankey/pareto views.
+            "Motor BOM (Cost & Weight)": ['bom', 'graph_settings'],
         }
         # The Motor/Controller efficiency maps are a single source of truth reused
         # everywhere (Drive Cycle Efficiency, Range, ...), so surface the upload
@@ -851,8 +867,9 @@ class TorqueSpeedApp(
         # adds one header, not clutter. Inserted just before the Graph Settings
         # panel when present, else appended.
         for _name, _secs in self.analysis_sections.items():
-            if _name == "MTPA / MTPV (PMSM)":
-                continue  # pure d-q analysis; efficiency maps are irrelevant
+            if _name in ("MTPA / MTPV (PMSM)", "Mechanical Design (Motor)",
+                         "Motor BOM (Cost & Weight)"):
+                continue  # pure model analyses; efficiency maps are irrelevant
             if 'efficiency_data' not in _secs:
                 if 'graph_settings' in _secs:
                     _secs.insert(_secs.index('graph_settings'), 'efficiency_data')

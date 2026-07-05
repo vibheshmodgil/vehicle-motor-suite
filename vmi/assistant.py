@@ -20,12 +20,42 @@ from .theme import COLORS, FONTS
 from . import llm_client
 from . import rag_store
 
+# Master persona prompt. Two explicit modes: knowledge-base data present ->
+# answer FROM the data with per-fact source markings; no data -> still answer
+# as an expert, but flagged as engineering judgment. The old prompt told the
+# model to stop when context was missing, which made it useless without data.
 SYSTEM_PROMPT = (
-    "You are an assistant embedded in the Vehicle-Motor Integration Suite, "
-    "a powertrain sizing tool. Answer using the provided context chunks "
-    "(past scenarios, the standard-motor library, testing standards, "
-    "datasheets, and the app's own flow documentation) when relevant. If the "
-    "context doesn't cover the question, say so plainly instead of guessing."
+    "You are the resident senior EV powertrain design engineer embedded in the "
+    "Vehicle-Motor Integration Suite, a two/three-wheeler EV powertrain sizing "
+    "tool. You have 20+ years of hands-on expertise across every discipline "
+    "this job touches: electric machine design (PMSM/BLDC/IM, d-q theory, "
+    "MTPA/MTPV, efficiency maps), power electronics and motor control, "
+    "mechanical design (rotor stress, shafts, press fits, bearings, rotor "
+    "dynamics — Shigley/Roark/DIN 7190/ISO 281/ISO 21940 practice), vehicle "
+    "dynamics and drive-cycle analysis, batteries and range estimation, "
+    "thermal management, NVH, and testing/homologation standards (IEC 60034, "
+    "AIS, ISO). Think and answer like that engineer: practical, quantitative, "
+    "direct. Use the trade's typical numbers, formulas, and design targets, "
+    "state your assumptions, and give a definite recommendation instead of "
+    "hedging.\n\n"
+    "Each question arrives with context chunks retrieved from the project's "
+    "knowledge base (datasheets, standards, saved scenarios, the app's own "
+    "documentation), each headed by its source file in [brackets].\n"
+    "- If the context covers the question: answer from it, and mark every "
+    "fact taken from it with the bracketed file name it came from, written "
+    "as (source: <that file name>). Be firm about these values — they are "
+    "the project's own data and take priority over general knowledge.\n"
+    "- If the context is empty or does not cover the question: start that "
+    "part of the answer with \"Not in the knowledge base — engineering "
+    "judgment:\" and then answer fully from first principles and standard "
+    "industry practice. Never refuse or go vague just because data is "
+    "missing; just keep data-backed facts and judgment clearly separated.\n"
+    "- Only ever cite file names that literally appear in [brackets] in the "
+    "context above. If none appear, cite no files at all — never invent a "
+    "source or attribute a number to the knowledge base that isn't in it.\n\n"
+    "Keep answers concise and structured (short bullets, SI units). When a "
+    "calculation is requested, show the formula, the substituted numbers, and "
+    "the result with units."
 )
 
 CHAT_LOG_PATH = "assistant_chat_log.jsonl"
@@ -83,10 +113,12 @@ class AssistantMixin:
         self.assistant_status_label.pack(side="top", fill="x", padx=10, pady=(0, 8))
 
         self._append_history(
-            "Ask me about past results, testing standards, datasheets you've "
-            "dropped into knowledge_base/, or how an analysis in this app "
-            "works. Click \"Rebuild Knowledge Base\" after adding or "
-            "removing files there.",
+            "I'm the resident powertrain design engineer — ask me anything "
+            "across motor design, mechanical, electrical, thermal, battery or "
+            "vehicle dynamics. Answers use your knowledge_base/ files (with "
+            "source markings) when they cover the question, and clearly-"
+            "flagged engineering judgment when they don't. Click \"Rebuild "
+            "Knowledge Base\" after adding or removing files there.",
             "meta",
         )
         self._poll_assistant_queue()
@@ -134,10 +166,22 @@ class AssistantMixin:
     def _chat_worker(self, question):
         try:
             hits = rag_store.query(question)
-            context = "\n\n".join(f"[{h['source']}]\n{h['text']}" for h in hits) or "(no matching context found)"
+            if hits:
+                context = "\n\n".join(f"[{h['source']}]\n{h['text']}" for h in hits)
+                # Small local models follow the citation rule far more
+                # reliably when it's restated right next to the question.
+                reminder = ("\n\nRemember: after each fact you take from the "
+                            "context, cite its [bracketed] file name as "
+                            "(source: ...). For anything the context doesn't "
+                            "cover, say \"Not in the knowledge base — "
+                            "engineering judgment:\" and answer anyway.")
+            else:
+                context = ("(no knowledge-base data matched this question — "
+                           "answer from engineering judgment and say so)")
+                reminder = ""
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"},
+                {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}{reminder}"},
             ]
             reply = llm_client.chat(messages)
             self._log_chat_exchange(question, reply, "ok")
