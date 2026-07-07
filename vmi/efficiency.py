@@ -272,13 +272,21 @@ class EfficiencyMixin:
         tq_abs = np.abs(np.asarray(torque_grid, dtype=float))
 
         peak_power_w = peak_power_kw * 1000.0
-        # Battery DC limit (optional): the shaft can never see more than
-        # Vdc*Idc*eta regardless of the motor rating, so the power-limited
-        # region of the acceptance rule uses the smaller of the two. Blank
-        # battery fields -> cap None -> rule unchanged (golden-locked).
+        # Battery DC limit (optional). With NO efficiency maps loaded, the
+        # shaft can never see more than the constant Vdc*Idc*eta, so the
+        # power-limited region of the acceptance rule uses the smaller of the
+        # two (original behaviour, golden-locked; blank battery fields ->
+        # cap None -> rule unchanged). With maps loaded, the battery limit is
+        # instead evaluated AFTER the motor x controller efficiency at each
+        # grid point -- see the extra AND below.
         _cap_fn = getattr(self, "get_battery_power_cap_w", None)
         batt_cap_w = _cap_fn() if callable(_cap_fn) else None
-        if batt_cap_w is not None:
+        _pdc_fn = getattr(self, "get_battery_dc_power_w", None)
+        _eta_get = getattr(self, "_battery_eta_fn", None)
+        p_dc = _pdc_fn() if callable(_pdc_fn) else None
+        batt_eta_fn = (_eta_get() if (p_dc is not None and callable(_eta_get))
+                       else None)
+        if batt_cap_w is not None and batt_eta_fn is None:
             peak_power_w = min(peak_power_w, float(batt_cap_w))
         omega = rpm_abs * 2.0 * np.pi / 60.0                      # rad/s
         base_rpm = (peak_power_w / peak_torque) * 60.0 / (2.0 * np.pi)
@@ -289,6 +297,15 @@ class EfficiencyMixin:
             tq_abs <= peak_torque + 1e-9,          # constant-torque region
             point_power_w <= peak_power_w + 1e-6,  # power-limited region
         )
+        if batt_eta_fn is not None:
+            # Map-aware battery feasibility: the point must also satisfy
+            # |T|*omega <= Vdc*Idc * eta_m(T,w) * eta_c(T,w).
+            try:
+                eta = np.asarray(batt_eta_fn(tq_abs.ravel(), rpm_abs.ravel()),
+                                 dtype=float).reshape(tq_abs.shape)
+                acceptable = acceptable & (point_power_w <= float(p_dc) * eta + 1e-6)
+            except Exception:
+                pass
         return acceptable
 
     def _draw_motor_capability_curve(self, ax=None, motor=1,
@@ -316,11 +333,18 @@ class EfficiencyMixin:
         try:
             xlims, ylims = ax.get_xlim(), ax.get_ylim()
             peak_power_w = peak_power_kw * 1000.0
-            # Same battery-DC-limit substitution as _motor_capability_mask,
-            # so the drawn envelope stays the exact boundary of the mask.
+            # Same battery-DC-limit treatment as _motor_capability_mask, so
+            # the drawn envelope stays the boundary of the mask: constant
+            # Vdc*Idc*eta substitution when no efficiency maps are loaded,
+            # map-aware per-point solve when they are.
             _cap_fn = getattr(self, "get_battery_power_cap_w", None)
             batt_cap_w = _cap_fn() if callable(_cap_fn) else None
-            if batt_cap_w is not None:
+            _pdc_fn = getattr(self, "get_battery_dc_power_w", None)
+            _eta_get = getattr(self, "_battery_eta_fn", None)
+            p_dc = _pdc_fn() if callable(_pdc_fn) else None
+            batt_eta_fn = (_eta_get() if (p_dc is not None and callable(_eta_get))
+                           else None)
+            if batt_cap_w is not None and batt_eta_fn is None:
                 peak_power_w = min(peak_power_w, float(batt_cap_w))
             base_rpm = (peak_power_w / peak_torque) * 60.0 / (2.0 * np.pi)
             rpm_end = max(xlims[1], base_rpm)
@@ -330,6 +354,15 @@ class EfficiencyMixin:
             tq_hyp = np.minimum(tq_hyp, peak_torque)
             rpm_curve = np.concatenate([rpm_flat, rpm_hyp])
             tq_curve = np.concatenate([np.full(rpm_flat.shape, peak_torque), tq_hyp])
+            if batt_eta_fn is not None:
+                # Battery limit evaluated after the efficiency maps: clip the
+                # motor envelope to T <= Vdc*Idc*eta(T,w)/w, solved per point.
+                from .calc_ext import cap_torque_to_power_via_eff
+                omega_curve = np.maximum(rpm_curve * 2.0 * np.pi / 60.0, 1e-9)
+                tq_curve = cap_torque_to_power_via_eff(
+                    tq_curve, omega_curve, float(p_dc),
+                    lambda t, om: batt_eta_fn(
+                        t, np.asarray(om, dtype=float) * 60.0 / (2.0 * np.pi)))
             ax.plot(rpm_curve, tq_curve, color="black", linewidth=2.0,
                     linestyle="-", zorder=6, label=label)
             if ylims[0] < 0:   # map shows regen torque: mirror the envelope
@@ -400,8 +433,9 @@ class EfficiencyMixin:
         ax.set_xlabel("Speed (RPM)")
         ax.set_ylabel("Torque (Nm)")
         # 'line': grid above the contourf fill, below plotted lines/markers --
-        # this panel doesn't route through apply_graph_style (Range analysis
-        # has no Graph Settings), so the axisbelow fix has to live here too.
+        # this panel is multi-axis (Range's Graph Settings apply per-panel via
+        # _range_apply_gs, not the single-axis apply_graph_style), so the
+        # axisbelow fix has to live here too.
         ax.set_axisbelow('line')
         ax.grid(True, linestyle='--', alpha=0.5)
 
@@ -431,6 +465,20 @@ class EfficiencyMixin:
         eff_vals = np.asarray(eff_map, dtype=float) * 100.0
         speed_grid, torque_grid = np.meshgrid(rpm_vals, torque_vals)
 
+        # Optional smoothing (off by default, same technique and contract as
+        # Drive Cycle Efficiency's "Extrapolate to envelope" toggle): nearest-
+        # neighbor-fill the map's own NaN holes, then bilinearly resample onto
+        # a dense 200x200 grid before masking. Without this, contourf drops an
+        # entire grid quad the moment any one of its four corners is NaN, so a
+        # few datasheet gaps right next to the capability curve can blank out
+        # a much bigger, already-valid swath than they actually cover -- this
+        # is what makes the map look coarse/blocky instead of a smooth field.
+        # The capability mask below still wins regardless of this toggle.
+        if hasattr(self, "gs_bool") and self.gs_bool("extrapolate_gaps", False):
+            eff_vals = self._extrapolate_eff_gaps(eff_vals, torque_grid, speed_grid)
+            speed_grid, torque_grid, eff_vals = self._dense_regrid_eff(
+                torque_vals, rpm_vals, eff_vals)
+
         # Blank out points the motor can't physically reach (see
         # _motor_capability_mask) instead of interpolating/extrapolating there.
         cap_mask = self._motor_capability_mask(torque_grid, speed_grid, motor=1)
@@ -447,10 +495,16 @@ class EfficiencyMixin:
         if eff_max - eff_min < 1e-6:
             eff_min = max(0.0, eff_min - 1.0)
             eff_max = min(100.0, eff_max + 1.0)
-        contour_levels = np.linspace(eff_min, eff_max, 40)
+        # Colormap / level counts / opacity from the Range Graph Settings
+        # panel; the defaults reproduce the original hard-coded look exactly.
+        cmap = self.gs_str('cmap', 'RdYlGn') if hasattr(self, 'gs_str') else 'RdYlGn'
+        fill_levels = max(2, self.gs_int('fill_levels', 40)) if hasattr(self, 'gs_int') else 40
+        line_levels = max(1, self.gs_int('line_levels', 10)) if hasattr(self, 'gs_int') else 10
+        map_alpha = self.gs_float('map_alpha', 0.75) if hasattr(self, 'gs_float') else 0.75
+        contour_levels = np.linspace(eff_min, eff_max, fill_levels)
 
-        contour = ax.contourf(speed_grid, torque_grid, eff_vals, cmap='RdYlGn', levels=contour_levels, alpha=0.75)
-        contour_lines = ax.contour(speed_grid, torque_grid, eff_vals, colors='black', linewidths=0.2, levels=10)
+        contour = ax.contourf(speed_grid, torque_grid, eff_vals, cmap=cmap, levels=contour_levels, alpha=map_alpha)
+        contour_lines = ax.contour(speed_grid, torque_grid, eff_vals, colors='black', linewidths=0.2, levels=line_levels)
         ax.clabel(contour_lines, inline=True, fontsize=8, fmt="%.0f")
         self.range_eff_colorbar = self.figure.colorbar(contour, ax=ax, label=colorbar_label, ticks=range(0, 101, 10))
         self._draw_motor_capability_curve(ax=ax)
@@ -653,6 +707,34 @@ class EfficiencyMixin:
         return max_speed, rated_speed, max_torque,max_power
     
 
+    def _overlay_thermal_points_on_map(self, ax=None):
+        """Overlay the thermal-load duty points (motor RPM, motor Nm) on an
+        efficiency map so the user can see whether each sustained condition
+        sits in an efficient, reachable part of the map. Fail-soft: overlay
+        off / helper missing (mixin-only test host) -> draws nothing."""
+        fn = getattr(self, "compute_thermal_load_points", None)
+        if not callable(fn):
+            return
+        try:
+            pts = fn() or []
+        except Exception:
+            return
+        ax = ax if ax is not None else self.ax
+        first = True
+        for i, p in enumerate(pts, 1):
+            ax.scatter(
+                p["motor_rpm"], p["motor_torque"], marker="X", s=110,
+                color="crimson", edgecolors="white", linewidths=0.8, zorder=8,
+                label="Thermal load points" if first else None)
+            ax.annotate(
+                f"{i}: {p['duration_s']:g}s",
+                xy=(p["motor_rpm"], p["motor_torque"]), xytext=(7, 7),
+                textcoords="offset points", fontsize=9, color="crimson",
+                fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="crimson",
+                          alpha=0.8))
+            first = False
+
     def _overlay_drive_cycle_on_efficiency_plot(self, regen=False):
         """Overlay the drive-cycle operating points on the current efficiency map.
 
@@ -756,7 +838,7 @@ class EfficiencyMixin:
             return None
 
         try:
-            gradient = float(self.gradients.get().split(",")[0].strip())
+            gradient = float(self.get_gradients_pct()[0])
         except Exception:
             gradient = 0.0
 
@@ -964,6 +1046,7 @@ class EfficiencyMixin:
             self.ax.grid(True, linestyle='--', alpha=0.8)
 
             self._draw_motor_capability_curve()
+            self._overlay_thermal_points_on_map()
             self._overlay_drive_cycle_on_efficiency_plot()
             if hasattr(self, "apply_graph_style"):
                 self.apply_graph_style()
@@ -1021,6 +1104,7 @@ class EfficiencyMixin:
             self.ax.grid(True, linestyle='--', alpha=0.8)
 
             self._draw_motor_capability_curve()
+            self._overlay_thermal_points_on_map()
             self._overlay_drive_cycle_on_efficiency_plot()
             if hasattr(self, "apply_graph_style"):
                 self.apply_graph_style()
@@ -1185,6 +1269,7 @@ class EfficiencyMixin:
             self.ax.grid(True, linestyle='--', alpha=0.8)
 
             self._draw_motor_capability_curve()
+            self._overlay_thermal_points_on_map()
             self._overlay_drive_cycle_on_efficiency_plot()
             if hasattr(self, "apply_graph_style"):
                 self.apply_graph_style()

@@ -103,9 +103,8 @@ class DispatchMixin:
 
         # Retrieve remaining inputs (same collect-all-errors treatment).
         try:
-            gradients = [float(g.strip()) for g in self.gradients.get().split(",") if g.strip()]
-            if not gradients:
-                raise ValueError
+            # Percent values, converted from degrees when that unit is selected.
+            gradients = self.get_gradients_pct()
         except Exception:
             errors.append("Gradients must be comma-separated numbers (e.g. 0,7,12).")
             gradients = [0.0]

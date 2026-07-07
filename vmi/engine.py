@@ -210,7 +210,7 @@ class EngineMixin:
             return
 
         try:
-            gradients = [float(grad.strip()) for grad in self.gradients.get().split(",") if grad.strip()]
+            gradients = self.get_gradients_pct()
         except Exception:
             gradients = []
         if not gradients:
@@ -359,7 +359,7 @@ class EngineMixin:
                 resist_curve_y,
                 linestyle="-.",
                 linewidth=1.5,
-                label=f"Resistive {curve_kind} @ {gradient:g}%",
+                label=f"Resistive {curve_kind} @ {self.fmt_gradient(gradient)}",
             )
             resistive_curves[gradient] = (resistive_speed.copy(), np.asarray(resist_curve_y, dtype=float))
 

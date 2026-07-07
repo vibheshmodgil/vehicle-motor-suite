@@ -14,7 +14,9 @@ from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
 from .physics import calculate_crr_cd_a, df, g
-from .calc_ext import battery_power_cap_w, effective_mass
+from .calc_ext import (battery_power_cap_w, cap_torque_to_power,
+                       cap_torque_to_power_via_eff, effective_mass,
+                       smooth_efficiency_matrix)
 from .applog import logger
 
 
@@ -531,6 +533,94 @@ class HelpersMixin:
             return None
 
 
+    def get_battery_dc_power_w(self):
+        """Raw battery DC power Vdc * Idc in W (NO efficiency applied), or
+        None when either Battery DC Limit field is blank/invalid."""
+        try:
+            v_raw = self.batt_voltage.get().strip()
+            i_raw = self.batt_current_limit.get().strip()
+        except Exception:
+            return None
+        if not v_raw or not i_raw:
+            return None
+        try:
+            return battery_power_cap_w(float(v_raw), float(i_raw), 1.0)
+        except Exception:
+            return None
+
+
+    def _battery_eta_fn(self):
+        """Combined motor x controller efficiency lookup eta(torque_nm,
+        motor_rpm) built from the shared uploaded maps (slot 1 = Motor,
+        slot 2 = Controller; a missing slot falls back to its constant-
+        efficiency entry). Returns None when NEITHER map is loaded, in which
+        case the battery cap keeps the original constant-eta behaviour."""
+        m_mat = getattr(self, "eff1_map_matrix", None)
+        c_mat = getattr(self, "eff2_map_matrix", None)
+        if m_mat is None and c_mat is None:
+            return None
+        interp = getattr(self, "_interpolate_efficiency_or_constant", None)
+        if interp is None:
+            return None
+        m_tq = getattr(self, "eff1_map_torques", None)
+        m_rpm = getattr(self, "eff1_map_rpms", None)
+        c_tq = getattr(self, "eff2_map_torques", None)
+        c_rpm = getattr(self, "eff2_map_rpms", None)
+        gec = getattr(self, "_get_eff_constant", None)
+        m_const = (gec(self.motor_eff_const, 0.90)
+                   if callable(gec) and getattr(self, "motor_eff_const", None) is not None
+                   else 0.90)
+        c_const = (gec(self.controller_eff_const, 0.95)
+                   if callable(gec) and getattr(self, "controller_eff_const", None) is not None
+                   else 0.95)
+
+        # Optional smoothing for the battery-limit lookup ONLY (off by
+        # default): fills NaN cells and blurs the map before it's used to
+        # solve the battery cap, so a coarse or NaN-holed uploaded map
+        # doesn't produce a hard efficiency cliff right at its coverage edge
+        # -- which is usually exactly where the battery limit binds hardest,
+        # showing up as an abrupt jump in the capped torque-speed curve. The
+        # map's own contour views are untouched (they read m_mat/c_mat
+        # directly, not through this function).
+        switch = getattr(self, "battery_eff_smoothing_switch", None)
+        if switch is not None:
+            try:
+                if switch.get():
+                    m_mat = smooth_efficiency_matrix(m_mat) if m_mat is not None else None
+                    c_mat = smooth_efficiency_matrix(c_mat) if c_mat is not None else None
+            except Exception:
+                pass
+
+        def eta(torque_nm, motor_rpm):
+            eta_m = interp(torque_nm, motor_rpm, m_mat, m_tq, m_rpm, m_const)
+            eta_c = interp(torque_nm, motor_rpm, c_mat, c_tq, c_rpm, c_const)
+            return np.clip(np.asarray(eta_m, dtype=float)
+                           * np.asarray(eta_c, dtype=float), 0.01, 1.0)
+
+        return eta
+
+
+    def cap_torque_to_battery(self, torque_nm, motor_rpm):
+        """THE battery-DC clip for a motor capability curve.
+
+        With the Motor/Controller efficiency maps loaded, the battery limit
+        is evaluated AFTER them: shaft torque is clipped so
+        |T|*omega <= Vdc*Idc*eta_m(T,w)*eta_c(T,w), solved per speed point
+        (see calc_ext.cap_torque_to_power_via_eff). With no maps loaded this
+        reduces to the original constant chain efficiency from the
+        Battery-to-Shaft Efficiency entry -- identical numbers to before.
+        Blank battery fields -> no cap either way."""
+        motor_rpm = np.asarray(motor_rpm, dtype=float)
+        omega = np.maximum(np.abs(motor_rpm) * 2.0 * np.pi / 60.0, 1e-9)
+        p_dc = self.get_battery_dc_power_w()
+        eta_fn = self._battery_eta_fn() if p_dc is not None else None
+        if eta_fn is None:
+            return cap_torque_to_power(torque_nm, omega, self.get_battery_power_cap_w())
+        return cap_torque_to_power_via_eff(
+            torque_nm, omega, p_dc,
+            lambda t, om: eta_fn(t, np.asarray(om, dtype=float) * 60.0 / (2.0 * np.pi)))
+
+
     def get_effective_inertial_mass(self, mass_kg, wheel_radius_m=None):
         """mass + J_wheel/r^2 for the inertial (m*a) terms only. A blank or
         0 Wheel Inertia field returns the plain mass unchanged. When no
@@ -549,6 +639,176 @@ class HelpersMixin:
                 return float(mass_kg)
         return effective_mass(mass_kg, j, wheel_radius_m)
 
+
+    def gradient_unit_is_degrees(self):
+        """True when the Gradient Unit selector is set to degrees. Missing
+        selector (e.g. a mixin-only test host) -> percent, the original unit."""
+        combo = getattr(self, "gradient_unit_combo", None)
+        if combo is None:
+            return False
+        try:
+            return "Degree" in str(combo.get())
+        except Exception:
+            return False
+
+    def convert_gradient_to_pct(self, value):
+        """One gradient input value -> slope percent, honoring the unit selector."""
+        from .units import gradient_deg_to_pct
+        value = float(value)
+        return gradient_deg_to_pct(value) if self.gradient_unit_is_degrees() else value
+
+    def get_gradients_pct(self):
+        """Parse the Gradients entry into a list of slope-percent values,
+        converting from degrees when that unit is selected. Raises ValueError
+        on a malformed/empty list so callers keep their own error handling."""
+        parts = [p.strip() for p in self.gradients.get().split(",") if p.strip()]
+        if not parts:
+            raise ValueError("Gradients list is empty.")
+        return [self.convert_gradient_to_pct(float(p)) for p in parts]
+
+    def fmt_gradient(self, pct):
+        """Format a slope-percent value for plot labels in the unit the user
+        typed it in: '7%' or, with degrees selected, '4°'."""
+        from .units import gradient_pct_to_deg
+        if self.gradient_unit_is_degrees():
+            return f"{gradient_pct_to_deg(pct):g}°"
+        return f"{float(pct):g}%"
+
+    @staticmethod
+    def _split_thermal_point_chunks(raw):
+        """Split the Thermal Load Points entry into one chunk per point.
+
+        Two accepted formats, auto-detected:
+          * ';'-separated triples, e.g. '0,60,300; 7,30,600' -- each chunk is
+            one point (lets a point's own numbers be visually grouped).
+          * a FLAT comma list with no ';', e.g. '0,60,300,7,30,600' -- the
+            same style as the Gradients field, extended to multiple points by
+            grouping every 3 numbers into one point. This is what most users
+            reach for first (Gradients is a flat comma list), so without this
+            a list like that used to silently keep only the first point and
+            drop everything after it.
+        A trailing 1-2 leftover numbers (an incomplete final point) is still
+        emitted as its own chunk so the parse loop can report it as an error
+        rather than silently dropping it.
+        """
+        if ";" in raw:
+            return [c for c in raw.split(";") if c.strip()]
+        nums = [p.strip() for p in raw.split(",") if p.strip()]
+        return [",".join(nums[i:i + 3]) for i in range(0, len(nums), 3)]
+
+    def compute_thermal_load_points(self):
+        """Parse the Thermal Load Points entry into motor operating points.
+
+        Entry format: 'gradient,speed,duration' triples, either separated by
+        ';' (e.g. '0,60,300; 7,30,600') or as one flat comma list grouped in
+        3s (e.g. '0,60,300,7,30,600') -- see _split_thermal_point_chunks.
+        Speed is km/h or motor RPM per the Point Speed Unit selector;
+        gradient honors the Gradient Unit selector. Each steady condition is
+        converted through the same resistive-force model the torque plot
+        uses (rho = 1.225):
+
+            F = m*g*Crr*cos(theta) + 0.5*rho*CdA*v^2 + m*g*sin(theta)
+            wheel torque = F*r;  motor torque = F*r / (GR*eta_gear)
+
+        Returns a list of dicts {grad_pct, v_kmh, duration_s, motor_rpm,
+        motor_torque, wheel_torque} and refreshes thermal_results_label with
+        the computed values. Returns [] (and clears the label) when the
+        overlay is off, the entry is blank, or anything fails to parse --
+        the overlay never blocks the underlying plot.
+        """
+        switch = getattr(self, "thermal_overlay_switch", None)
+        entry = getattr(self, "thermal_points", None)
+        label = getattr(self, "thermal_results_label", None)
+
+        def _set_label(text):
+            if label is not None:
+                try:
+                    label.configure(text=text)
+                except Exception:
+                    pass
+
+        if switch is None or entry is None:
+            return []
+        try:
+            if not switch.get():
+                _set_label("")
+                return []
+            raw = entry.get().strip()
+        except Exception:
+            return []
+        if not raw:
+            _set_label("No points entered, e.g. 0,60,300,7,30,600 (grad,speed,time per point)")
+            return []
+
+        try:
+            m_ref = float(self.m_ref.get())
+            rear_load_ratio = float(self.rear_load_ratio.get())
+            ambient_temp = float(self.ambient_temp.get())
+            ambient_pressure = float(self.ambient_pressure.get())
+            crr = float(self.crr.get()) if self.crr.get().strip() else None
+            cd_a = float(self.cd_a.get()) if self.cd_a.get().strip() else None
+            params = calculate_crr_cd_a(
+                m_ref, rear_load_ratio, ambient_temp, ambient_pressure,
+                crr=crr if self.crr_manual else None,
+                cd_a=cd_a if self.cda_manual else None,
+            )
+            wheel_radius = float(self.wheel_radius.get())
+            gear_ratio = float(self.gear_ratio.get())
+            gear_eff = self.get_gear_efficiency_value()
+        except Exception:
+            _set_label("Thermal points: fill in vehicle/motor inputs first.")
+            return []
+
+        rpm_unit = False
+        combo = getattr(self, "thermal_speed_unit_combo", None)
+        if combo is not None:
+            try:
+                rpm_unit = "RPM" in str(combo.get())
+            except Exception:
+                rpm_unit = False
+
+        points = []
+        lines = []
+        drive_scale = max(gear_ratio * gear_eff, 1e-9)
+        for i, chunk in enumerate(self._split_thermal_point_chunks(raw), 1):
+            try:
+                parts = [p.strip() for p in chunk.split(",") if p.strip()]
+                if len(parts) < 2:
+                    raise ValueError(chunk)
+                grad_pct = self.convert_gradient_to_pct(float(parts[0]))
+                speed_val = float(parts[1])
+                duration_s = float(parts[2]) if len(parts) > 2 else 0.0
+                if rpm_unit:
+                    motor_rpm = speed_val
+                    v_mps = (motor_rpm / max(abs(gear_ratio), 1e-9)) \
+                        * 2.0 * np.pi * wheel_radius / 60.0
+                else:
+                    v_mps = speed_val / 3.6
+                    motor_rpm = (v_mps / max(wheel_radius, 1e-9)) \
+                        * 60.0 / (2.0 * np.pi) * gear_ratio
+                theta = np.arctan(grad_pct / 100.0)
+                force_n = (
+                    params['m_i'] * g * params['Crr'] * np.cos(theta)
+                    + 0.5 * 1.225 * params['CdA'] * v_mps ** 2
+                    + params['m_i'] * g * np.sin(theta)
+                )
+                wheel_torque = force_n * wheel_radius
+                motor_torque = wheel_torque / drive_scale
+                points.append(dict(
+                    grad_pct=float(grad_pct), v_kmh=float(v_mps * 3.6),
+                    duration_s=float(duration_s),
+                    motor_rpm=float(motor_rpm),
+                    motor_torque=float(motor_torque),
+                    wheel_torque=float(wheel_torque),
+                ))
+                lines.append(
+                    f"{i}) {self.fmt_gradient(grad_pct)} @ {v_mps * 3.6:.0f} km/h, "
+                    f"{duration_s:g}s -> {motor_torque:.1f} Nm @ {motor_rpm:.0f} RPM"
+                )
+            except Exception:
+                lines.append(f"{i}) could not parse '{chunk.strip()}'")
+        _set_label("\n".join(lines))
+        return points
 
     def on_mref_change(self, event):
         if not self.crr_manual or not self.cda_manual:

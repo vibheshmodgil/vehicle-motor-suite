@@ -20,6 +20,71 @@ from .calc_ext import air_density_isa, trapz_energy_wh, check_energy_invariants
 
 class RangeAnalysisMixin:
 
+    def _range_apply_gs(self):
+        """Apply the Range Graph Settings to every panel of the current
+        figure (apply_graph_style only handles the single self.ax). Only
+        settings the user has actually TOUCHED are applied: the stock panels
+        deliberately differ in grid alpha / font size, so untouched settings
+        must leave them exactly as drawn."""
+        vals = getattr(self, "_gs_values", None)
+        if not vals:
+            return
+        analysis = "Range analysis"
+
+        def touched(*keys):
+            return any((analysis, k) in vals for k in keys)
+
+        from matplotlib.ticker import MultipleLocator
+        for ax in self.figure.axes:
+            try:
+                if ax.get_label() == "<colorbar>":
+                    continue
+                if not ax.patch.get_visible():
+                    continue  # twinx overlay (the loss panel's % axis)
+                if touched("grid_x", "grid_y", "grid_style", "grid_alpha",
+                           "grid_x_step", "grid_y_step"):
+                    grid_x = self.gs_bool("grid_x", True)
+                    grid_y = self.gs_bool("grid_y", True)
+                    grid_ls = self.gs_linestyle("grid_style", "--")
+                    grid_alpha = self.gs_float("grid_alpha", 0.6)
+                    gx_step = self.gs_float("grid_x_step", 0.0)
+                    gy_step = self.gs_float("grid_y_step", 0.0)
+                    if gx_step and gx_step > 0:
+                        lo, hi = ax.get_xlim()
+                        if 0 < (hi - lo) / gx_step <= 1000:
+                            ax.xaxis.set_major_locator(MultipleLocator(gx_step))
+                    if gy_step and gy_step > 0:
+                        lo, hi = ax.get_ylim()
+                        if 0 < (hi - lo) / gy_step <= 1000:
+                            ax.yaxis.set_major_locator(MultipleLocator(gy_step))
+                    ax.set_axisbelow('line')
+                    ax.grid(False)
+                    if grid_x:
+                        ax.grid(True, axis="x", linestyle=grid_ls, alpha=grid_alpha)
+                    if grid_y:
+                        ax.grid(True, axis="y", linestyle=grid_ls, alpha=grid_alpha)
+                if touched("show_legend", "legend_loc"):
+                    show = self.gs_bool("show_legend", True)
+                    loc = self.gs_str("legend_loc", "best") or "best"
+                    handles, _labels = ax.get_legend_handles_labels()
+                    existing = ax.get_legend()
+                    if show and handles:
+                        ax.legend(loc=loc, fontsize=8)
+                    elif not show and existing is not None:
+                        existing.remove()
+                if touched("title_size") and ax.get_title():
+                    ax.title.set_fontsize(self.gs_int("title_size", 12))
+                if touched("label_size"):
+                    size = self.gs_int("label_size", 10)
+                    ax.xaxis.label.set_size(size)
+                    ax.yaxis.label.set_size(size)
+                if touched("line_width"):
+                    width = self.gs_float("line_width", 1.0)
+                    for line in ax.get_lines():
+                        line.set_linewidth(width)
+            except Exception:
+                pass
+
     def plot_power_energy_cycle(self):
         # Silence the verbose debug prints unless self._debug is set. This only
         # affects console logging; no calculation is touched.
@@ -131,7 +196,7 @@ class RangeAnalysisMixin:
             return
 
         try:
-            gradient = float(self.gradients.get().split(",")[0].strip())
+            gradient = float(self.get_gradients_pct()[0])
         except Exception:
             gradient = 0.0
 
@@ -236,6 +301,19 @@ class RangeAnalysisMixin:
             except Exception:
                 pass
 
+        # Fold the (possibly capped) regen back into the battery power trace:
+        # the battery only ACCEPTS battery_regen_power of charge, so the
+        # battery power/energy/C-rate and the net Wh/km below all see the
+        # capped value. Without a cap this is a no-op (the negative side is
+        # -battery_regen_power by construction). Previously the cap only
+        # affected the displayed regen bar, not the battery energy or the
+        # range estimate -- logically inconsistent.
+        battery_output_power_clean = np.where(
+            battery_output_power_clean < 0.0,
+            -battery_regen_power,
+            battery_output_power_clean,
+        )
+
         distance_m = speed_mps * dt
         distance_km = distance_m / 1000.0
         cummulative_distance_km = np.cumsum(distance_km)
@@ -338,7 +416,13 @@ class RangeAnalysisMixin:
             controller_loss_per_km +
             aux_loss_total_per_km
         )
-        net_energy_loss_per_km =  controller_in_energy_cum_wh[-1] / total_dist_km if total_dist_km > 1e-9 else 0.0
+        # Net battery draw per km = what the pack actually delivers over the
+        # cycle: motoring energy INCLUDING the auxiliary load, minus the regen
+        # the battery actually accepts (capped above). The previous version
+        # used controller input energy here -- it ignored both the aux load
+        # (which the model itself adds to battery output) and the regen cap,
+        # so the range estimate disagreed with the loss breakdown beside it.
+        net_energy_loss_per_km = battery_out_energy_cum_wh[-1] / total_dist_km if total_dist_km > 1e-9 else 0.0
         
         print("WHEEL CHECK:",
             e_aero_cum_wh[-1] +
@@ -616,10 +700,37 @@ class RangeAnalysisMixin:
                 overlay_torque=np.abs(motor_torque),
             )
 
+        # Battery-utilization figures for the report's Range interpretation
+        # (all derived from arrays already computed above; purely additive --
+        # no existing metric changes).
+        batt_kw = battery_output_power_clean / 1000.0
+        peak_idx = int(np.argmax(batt_kw)) if batt_kw.size else 0
+        peak_batt_kw = float(batt_kw[peak_idx]) if batt_kw.size else 0.0
+        peak_batt_time_s = float(time[peak_idx]) if batt_kw.size else 0.0
+        # Duration spent within 90% of the peak power (severity of the peak
+        # events) and the average power while actually moving.
+        near_peak_s = float(np.sum(dt[batt_kw >= 0.9 * peak_batt_kw])) if peak_batt_kw > 0 else 0.0
+        moving = speed > 0.5
+        avg_moving_kw = float(np.mean(batt_kw[moving])) if np.any(moving) else 0.0
+        denom_crate = cell_voltage * cell_capacity * max(n_series * n_parallel, 1) * max(cell_efficiency / 100.0, 1e-9)
+        peak_c_rate = float(np.max(battery_output_power_clean) / denom_crate) if denom_crate > 1e-9 else 0.0
+        # Where does the motoring energy go: accelerating vs cruising?
+        wheel_pos = np.where(wheel_power_clean > 0, wheel_power_clean, 0.0)
+        e_wheel_pos = float(np.sum(wheel_pos * dt))
+        e_wheel_accel = float(np.sum(wheel_pos[acc > 0.05] * dt[acc > 0.05]))
+        accel_share_pct = 100.0 * e_wheel_accel / e_wheel_pos if e_wheel_pos > 1e-9 else 0.0
+
         # Stash the per-km energy breakdown so the export, report and the
         # waterfall view can reuse it; run cheap sanity checks and surface any
         # warning in the status bar.
         self._last_range_metrics = {
+            "peak_battery_power_kw": round(peak_batt_kw, 3),
+            "peak_battery_power_at_s": round(peak_batt_time_s, 1),
+            "time_within_90pct_of_peak_s": round(near_peak_s, 1),
+            "avg_battery_power_moving_kw": round(avg_moving_kw, 3),
+            "peak_c_rate": round(peak_c_rate, 3),
+            "total_battery_energy_wh": round(float(battery_out_energy_cum_wh[-1]), 2),
+            "wheel_energy_share_accelerating_pct": round(accel_share_pct, 1),
             "trip_distance_km": round(float(total_dist_km), 3),
             "aerodynamic_loss_per_km": round(float(aerodynamic_loss_per_km), 3),
             "rolling_loss_per_km": round(float(rolling_loss_per_km), 3),
@@ -710,6 +821,8 @@ class RangeAnalysisMixin:
             controller_source=ctrl_eff_source,
         )
         print(summary_text.replace("\n", " | "))
+        # Per-panel Graph Settings (only user-touched settings are applied).
+        self._range_apply_gs()
         self.figure.tight_layout()
         self.canvas.draw_idle()
 

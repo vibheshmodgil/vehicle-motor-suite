@@ -50,3 +50,18 @@ def rpm_to_rad_s(rpm):
 def rad_s_to_rpm(omega):
     """Angular velocity (rad/s) -> RPM."""
     return np.asarray(omega, dtype=float) * 60.0 / TWO_PI
+
+
+def gradient_deg_to_pct(angle_deg):
+    """Incline angle (degrees) -> slope percentage (rise/run x 100).
+
+    pct = tan(theta) * 100. The app's physics works in percent everywhere
+    (theta = arctan(pct/100)), so a degree input converted here round-trips
+    to exactly the entered angle.
+    """
+    return float(np.tan(np.radians(float(angle_deg))) * 100.0)
+
+
+def gradient_pct_to_deg(pct):
+    """Slope percentage -> incline angle in degrees (inverse of the above)."""
+    return float(np.degrees(np.arctan(float(pct) / 100.0)))

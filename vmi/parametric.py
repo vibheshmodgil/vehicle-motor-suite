@@ -75,8 +75,9 @@ class ParametricMixin:
             )
 
         # Battery DC limit (optional): the available motor torque is clipped
-        # to T <= P_cap/w before scaling to the wheel. None -> untouched.
-        motor_torque = cap_torque_to_power(motor_torque, motor_omega, self.get_battery_power_cap_w())
+        # before scaling to the wheel (map-aware when the efficiency maps are
+        # loaded). None -> untouched.
+        motor_torque = self.cap_torque_to_battery(motor_torque, speeds_rpm_motor)
 
         wheel_torque = motor_torque * gear_ratio * gear_eff
         wheel_force = wheel_torque / wheel_radius
@@ -202,6 +203,21 @@ class ParametricMixin:
         values = np.asarray(values, dtype=float)
         lo, hi = float(np.min(values)), float(np.max(values))
         in_range = lo <= current_val <= hi
+        # Stash the sweep so the report's interpretation block can state the
+        # input/output ranges, the current point, and the local sensitivity
+        # without re-running the (possibly expensive) sweep.
+        try:
+            self._last_parametric = dict(
+                kind="1d",
+                graph_type=self.parametric_graph_combo.get(),
+                param=str(param_symbol),
+                x=np.asarray(values, dtype=float).tolist(),
+                y=(np.asarray(y_values, dtype=float).tolist()
+                   if y_values is not None else None),
+                current_x=float(current_val),
+            )
+        except Exception:
+            pass
         xlim = self.ax.get_xlim()  # axvline can otherwise stretch the x-axis
         label = f"Current {param_symbol} = {current_val:.4g}"
         if not in_range:
@@ -253,6 +269,21 @@ class ParametricMixin:
                 "Widen the ranges or check motor/vehicle inputs."
             )
             return
+        # Stash for the report's interpretation block (same idea as the 1D
+        # stash in _mark_current_param_1d).
+        try:
+            self._last_parametric = dict(
+                kind="2d",
+                graph_type=self.parametric_graph_combo.get(),
+                cda=np.asarray(cda_values, dtype=float).tolist(),
+                crr=np.asarray(crr_values, dtype=float).tolist(),
+                map=value_map.tolist(),
+                cbar_label=str(cbar_label),
+                current_cda=(float(current_cda) if current_cda is not None else None),
+                current_crr=(float(current_crr) if current_crr is not None else None),
+            )
+        except Exception:
+            pass
 
         cda_grid, crr_grid = np.meshgrid(cda_values, crr_values)
         masked = np.ma.masked_invalid(value_map)

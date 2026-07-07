@@ -463,11 +463,20 @@ class BomMixin:
                              ("tweight", "g tot", 60)):
             self.bom_treeview.heading(col, text=text)
             self.bom_treeview.column(col, width=w, anchor="e", stretch=False)
+        # Both scrollbars: the columns are wider than the input panel, so
+        # without the horizontal one the ₹/g total columns are simply cut off
+        # at narrow window widths (grid so the two bars can share the corner).
         vsb = ttk.Scrollbar(tree_wrap, orient="vertical",
                             command=self.bom_treeview.yview)
-        self.bom_treeview.configure(yscrollcommand=vsb.set)
-        self.bom_treeview.pack(side="left", fill="both", expand=True)
-        vsb.pack(side="left", fill="y")
+        hsb = ttk.Scrollbar(tree_wrap, orient="horizontal",
+                            command=self.bom_treeview.xview)
+        self.bom_treeview.configure(yscrollcommand=vsb.set,
+                                    xscrollcommand=hsb.set)
+        self.bom_treeview.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        tree_wrap.grid_rowconfigure(0, weight=1)
+        tree_wrap.grid_columnconfigure(0, weight=1)
         self._bom_iid_map = {}
 
         row = ctk.CTkFrame(frame, fg_color="transparent")
@@ -768,7 +777,6 @@ class BomMixin:
         (their cost/weight roll up from children)."""
         win = ctk.CTkToplevel(self)
         win.title("Edit Assembly" if is_assembly else "Edit Part")
-        win.geometry("340x360")
         win.transient(self)
         win.grab_set()
 
@@ -829,6 +837,14 @@ class BomMixin:
         ctk.CTkButton(btns, text="Cancel", fg_color=COLORS['warning'],
                       command=win.destroy).pack(side="left", expand=True,
                                                 fill="x")
+        # Size the popup to its actual content (the old fixed 340x360 clipped
+        # the Save/Cancel row on the taller part editor) and keep it resizable
+        # with a sane floor so nothing can be hidden at any screen resolution.
+        win.update_idletasks()
+        req_h = max(win.winfo_reqheight() + 12, 240)
+        win.geometry(f"360x{req_h}")
+        win.minsize(320, 240)
+        win.resizable(True, True)
 
     # ------------------------------------------------------------------ #
     #  Plotting                                                          #

@@ -22,6 +22,7 @@ Nothing in physics.py was modified; the verbatim calculation core is untouched.
 """
 
 import numpy as np
+from scipy.ndimage import gaussian_filter
 
 # Sea-level reference used by the original code everywhere except one typo.
 RHO_AIR_DEFAULT = 1.225          # kg/m^3 at ISA sea level, 15 degC
@@ -121,6 +122,81 @@ def cap_torque_to_power(torque_nm, omega_rad_s, cap_w=None):
     omega = np.maximum(np.abs(np.asarray(omega_rad_s, dtype=float)), 1e-9)
     limit = float(cap_w) / omega
     return np.clip(torque_nm, -limit, limit)
+
+
+def cap_torque_to_power_via_eff(torque_nm, omega_rad_s, p_dc_w=None, eta_fn=None, iters=8):
+    """Clip a torque curve so shaft power never exceeds the battery DC power
+    TIMES the drivetrain efficiency at the (capped) operating point:
+
+        |T| * omega <= p_dc_w * eta_fn(T, omega)
+
+    This evaluates the battery limit AFTER the motor/controller efficiency
+    maps rather than through a fixed battery-to-shaft chain efficiency.
+    Because eta depends on the torque itself, each point is solved by
+    fixed-point iteration T <- clip(T, +/- p_dc*eta(T, w)/w): the efficiency
+    is re-read at the clipped point until it settles. Sign-preserving, so
+    regen torque is clipped symmetrically (eta_fn is called with the signed
+    torque; the app's map lookup uses |T|).
+
+    p_dc_w=None or eta_fn=None -> identity, a strict no-op, so blank battery
+    fields / missing maps reproduce the original behaviour exactly.
+    """
+    torque_nm = np.asarray(torque_nm, dtype=float)
+    if p_dc_w is None or eta_fn is None:
+        return torque_nm
+    omega = np.maximum(np.abs(np.asarray(omega_rad_s, dtype=float)), 1e-9)
+    p_dc = float(p_dc_w)
+    capped = np.array(torque_nm, dtype=float, copy=True)
+    for _ in range(int(iters)):
+        eta = np.clip(np.asarray(eta_fn(capped, omega), dtype=float), 0.01, 1.0)
+        limit = p_dc * eta / omega
+        new = np.clip(torque_nm, -limit, limit)
+        if np.allclose(new, capped, rtol=1e-6, atol=1e-9):
+            capped = new
+            break
+        capped = new
+    return capped
+
+
+def smooth_efficiency_matrix(matrix, sigma=1.0):
+    """Fill a map's NaN coverage gaps for the BATTERY-LIMIT lookup only
+    (cap_torque_to_power_via_eff and the capability mask/envelope that share
+    it), WITHOUT altering a single measured cell.
+
+    Why this exists: a datasheet map's blank cells (above the torque-speed
+    envelope) are correctly kept as NaN in the map itself (see
+    efficiency._normalize_efficiency_map_data). But RegularGridInterpolator's
+    bilinear formula propagates NaN through an ENTIRE grid cell the moment
+    any one of its four corners is NaN, and the app then substitutes a flat
+    constant (default_eff) for those NaN results -- creating a hard step
+    between real map data and that constant exactly at the map's coverage
+    edge, which is usually the very region the battery limit binds hardest.
+
+    Contract (tightened 2026-07 after the first version blurred the whole
+    matrix and visibly rounded off the REAL base-speed corner where the
+    peak-torque plateau meets the power hyperbola):
+      * every measured (finite) cell keeps its exact value -- genuine sharp
+        features of the motor's behaviour are preserved;
+      * only the synthetic cells (NaN filled by nearest-neighbor purely so
+        bilinear interpolation has four finite corners) are Gaussian-blended,
+        so the extension beyond the map's coverage is smooth rather than
+        blocky;
+      * a fully populated map, or an all-NaN one, is returned unchanged.
+    """
+    from scipy.interpolate import NearestNDInterpolator
+    vals = np.asarray(matrix, dtype=float)
+    valid = np.isfinite(vals)
+    if not np.any(valid) or np.all(valid):
+        return vals
+    idx = np.indices(vals.shape)
+    interp = NearestNDInterpolator(
+        np.column_stack([idx[0][valid], idx[1][valid]]), vals[valid])
+    filled = vals.copy()
+    filled[~valid] = interp(np.column_stack([idx[0][~valid], idx[1][~valid]]))
+    if sigma > 0:
+        blurred = gaussian_filter(filled, sigma=sigma, mode="nearest")
+        filled[~valid] = blurred[~valid]   # blend ONLY the synthetic cells
+    return filled
 
 
 def effective_mass(mass_kg, wheel_inertia_kgm2=0.0, wheel_radius_m=None):

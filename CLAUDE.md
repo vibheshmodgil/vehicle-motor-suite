@@ -88,6 +88,17 @@ same `.get()`/`.set()`/`command=` contract, far less vertical/horizontal space.
 label-left/control-right row builder for non-entry widgets (switches, segmented
 buttons) — reuse it instead of hand-rolling a frame.
 
+**Range net-energy fix (2026-07, explicit user request).** Two consistency
+bugs in `plot_power_energy_cycle` were corrected: (1) the optional
+`regen_cap_w` is now folded back into `battery_output_power_clean` (the
+battery only *accepts* the capped regen), so the power/energy/C-rate traces
+and the energy totals all see it — previously the cap only changed the
+displayed regen bar; (2) `net_energy_loss_per_km` (which drives the range
+estimate) is now `battery_out_energy / km` — motoring energy **including the
+auxiliary load** minus **accepted (capped) regen** — instead of controller
+input energy, which ignored both aux and the cap and disagreed with the loss
+breakdown drawn beside it. With aux = 0 and no cap the numbers are unchanged.
+
 ### Motor capability envelope masking
 Every torque-vs-RPM efficiency contour (`plot_efficiency_map_motor1/2`,
 `plot_efficiency_map_combined`, `plot_efficiency_difference_map`, and the Range
@@ -373,21 +384,68 @@ app — treat writes carefully.
   model exactly; keep that property — advanced features must be no-ops when off.
 - **Battery DC limit + wheel inertia (2026-07, same no-op contract).** Two
   optional physics effects, pure helpers in `calc_ext.py`
-  (`battery_power_cap_w`, `cap_torque_to_power`, `effective_mass`,
-  golden-locked in `tests/test_battery_wheel_inertia.py`), read via
+  (`battery_power_cap_w`, `cap_torque_to_power`, `cap_torque_to_power_via_eff`,
+  `effective_mass`, golden-locked in `tests/test_battery_wheel_inertia.py` and
+  `tests/test_battery_eff_cap.py`), read via
   `HelpersMixin.get_battery_power_cap_w()` / `get_effective_inertial_mass()`:
   - **Battery DC limit** (`batt_voltage`, `batt_current_limit`,
     `batt_to_shaft_eff` entries in the Motor section; blank V or I = no cap):
-    shaft power is capped at Vdc·Idc·η, clipping T ≤ P_cap/ω on **every
-    capability curve** — `plot_torque_graph` (theoretical + uploaded, both
-    parts), `plot_force_graph`, `plot_vehicle_max_speed_vs_time`,
+    **every capability-curve clip goes through
+    `HelpersMixin.cap_torque_to_battery(torque, motor_rpm)`** — it picks the
+    evaluation order automatically. With the shared Motor/Controller
+    efficiency maps loaded, the battery limit is evaluated **after** them:
+    T ≤ Vdc·Idc·η_m(T,ω)·η_c(T,ω)/ω, solved per point by fixed-point
+    iteration (`calc_ext.cap_torque_to_power_via_eff`; raw DC power from
+    `get_battery_dc_power_w()`, combined-η lookup from `_battery_eta_fn()`,
+    missing slot → its `motor_eff_const`/`controller_eff_const` constant).
+    With **no maps** it reduces to the original constant-η cap
+    (Vdc·Idc·`batt_to_shaft_eff`) byte-for-byte — that entry is now labelled
+    as the no-map fallback. Applied on **every capability curve** —
+    `plot_torque_graph` (theoretical + uploaded, both parts),
+    `plot_force_graph`, `plot_vehicle_max_speed_vs_time`,
     `parametric._compute_available_wheel_force` (so top speed / accel /
     gradability sweeps all see it), Compare Std's saved-motor overlays (the
     battery belongs to the *vehicle*, so it caps every motor compared), and
-    the efficiency-map envelope (`_motor_capability_mask` +
-    `_draw_motor_capability_curve`, guarded with `getattr` because the test
-    host is `EfficiencyMixin`-only). Drive-cycle/Range *demand* curves are
-    deliberately NOT clipped — demand is demand; the cap limits capability.
+    the efficiency-map envelope (`_motor_capability_mask` adds the map-aware
+    condition as an extra AND; `_draw_motor_capability_curve` solves the
+    same boundary — both guarded with `getattr` because the test host is
+    `EfficiencyMixin`-only, and both keep the constant-cap path exactly when
+    no maps are loaded). Drive-cycle/Range *demand* curves are deliberately
+    NOT clipped — demand is demand; the cap limits capability.
+  - **Smooth Map for Battery Limit** (`battery_eff_smoothing_switch`, next to
+    the battery fields; off by default, 2026-07). Root cause of "abrupt
+    changes in the capped torque-speed curve when a DC limit is applied and
+    an efficiency map is loaded": `RegularGridInterpolator`'s bilinear
+    formula propagates NaN through an ENTIRE grid cell the moment any one of
+    its four corners is NaN (the datasheet's blank region above the
+    torque-speed envelope, correctly kept NaN per the contract above), and
+    `_interpolate_efficiency_or_constant` then substitutes the flat
+    `default_eff` constant for those NaN results — a hard efficiency cliff
+    between real map data and that constant, landing exactly at the map's
+    own coverage edge, which is usually where the battery limit binds
+    hardest. Reproduced and golden-locked in
+    `tests/test_battery_eff_cap.py::TestSmoothEfficiencyMatrix` (a coarse
+    8x8 synthetic map shows a real ~0.145 efficiency discontinuity at an
+    internal grid line, identical across 8/40/200 solver iterations — i.e.
+    a real map artifact, not a fixed-point convergence issue). When ON,
+    `HelpersMixin._battery_eta_fn()` runs `calc_ext.smooth_efficiency_matrix`
+    on `eff1_map_matrix`/`eff2_map_matrix` before building the eta lookup
+    used by `cap_torque_to_battery`, `_motor_capability_mask`'s battery AND
+    condition, and `_draw_motor_capability_curve` — since all three share
+    that one function, the fix applies to every capability curve at once
+    with no per-call-site changes needed. **Tightened contract (user
+    feedback):** `smooth_efficiency_matrix` never alters a measured cell —
+    it nearest-neighbor-fills the NaN coverage gaps and Gaussian-blends
+    ONLY those synthetic cells (a fully populated map passes through
+    bit-identical). The first version blurred the whole matrix and visibly
+    rounded off the REAL base-speed corner where the peak-torque plateau
+    meets the power hyperbola; genuine sharp features must survive the
+    toggle. Locked in `TestSmoothEfficiencyMatrix`. The map's own contour VIEWS
+    (`plot_efficiency_map_motor1/2`, Combined, Difference, Regen, and the
+    Range M/C Eff panels) are untouched — they read the raw matrix directly,
+    not through `_battery_eta_fn`, so the NaN-stays-NaN contract there is
+    unaffected. No-op when no maps are loaded (falls straight through to the
+    constant-eta cap) or when the toggle is off.
   - **Wheel inertia** (`wheel_inertia` entry in Vehicle Parameters, kg·m²
     total, default 0): m_eff = m + J/r² is used in the **inertial (m·a)
     terms only** — acceleration sims (`plot_vehicle_max_speed_vs_time`,
@@ -397,6 +455,28 @@ app — treat writes carefully.
     steady-state results (top speed, gradability) are unaffected by design.
   Both fields persist automatically (scenario/session collection scans every
   `CTkEntry`) and appear in the report's core-inputs table.
+- **Gradient unit selector (2026-07).** The Gradients entry (dynamics
+  section) has a `gradient_unit_combo` ("Percent (%)" / "Degrees (°)").
+  **Never parse `self.gradients` raw** — go through
+  `HelpersMixin.get_gradients_pct()` (raises ValueError on bad input) or
+  `convert_gradient_to_pct(value)`; all physics stays in percent
+  (θ = arctan(pct/100)). `fmt_gradient(pct)` renders a legend label back in
+  the entered unit. Pure conversions `gradient_deg_to_pct`/`_pct_to_deg`
+  live in `units.py`, locked in `tests/test_battery_eff_cap.py`.
+- **Thermal load points (2026-07).** Section key `thermal` (shown in
+  Powertrain Sizing + Drive Cycle Efficiency): a switch
+  (`thermal_overlay_switch`), a speed-unit combo
+  (`thermal_speed_unit_combo`, km/h or Motor RPM) and one entry
+  (`thermal_points`, `'gradient,speed,duration_s'` triples separated by
+  `;`). `HelpersMixin.compute_thermal_load_points()` converts each steady
+  condition through the same resistive-force model as the torque plot
+  (ρ = 1.225) into `{grad_pct, v_kmh, duration_s, motor_rpm, motor_torque,
+  wheel_torque}` dicts and writes the readout to `thermal_results_label`.
+  Overlays: `_overlay_thermal_points_torque` (torque view only, gated to
+  Powertrain Sizing so Compare Std doesn't inherit it) and
+  `_overlay_thermal_points_on_map` (Motor 1 / Controller / Combined maps;
+  not regen/difference). All fail-soft and draw nothing when off/blank.
+  The report's observations flag any point exceeding peak capability.
 ---
 
 ## 7. Conventions to follow when editing
@@ -435,6 +515,18 @@ re-packs from the saved list. All sections **start collapsed**
 `reapply_collapsed_states()` is called at its end to keep user-collapsed sections
 collapsed. `self.input_scroll_canvas` is stored so `_refresh_scrollregion()` can
 update the scrollbar after a toggle.
+
+**The figure layout is auto-fitted on every draw (2026-07).** The
+`enh_setup` draw/draw_idle wrapper calls `self.figure.tight_layout()`
+(warnings suppressed — manually placed axes just get skipped) before every
+canvas draw, and a `resize_event` hook triggers `draw_idle()`, so axis/tick
+labels stay visible when the window is resized or a paned divider is
+dragged. Individual plot methods no longer need their own `tight_layout()`
+call for correctness (existing ones are harmless). Don't position axes with
+figure-fraction magic numbers that assume a fixed margin. Related: the BOM
+tree editor has both scrollbars (grid layout in `tree_wrap`) and
+`_bom_edit_popup` sizes itself to its content (`winfo_reqheight`) instead of
+a fixed geometry, so no control can be clipped at small window sizes.
 
 **Grid control is per-axis.** `apply_graph_style` reads `grid_x`, `grid_y`,
 `grid_style`, `grid_alpha` (not a single on/off) and enables vertical/horizontal
@@ -502,8 +594,15 @@ applies grid/legend/title/label-size to `self.ax` and is called at the end of
   longer hard-code a grid — `apply_graph_style` is the sole authority and is
   called both at the end of `plot_graph` and inside `plot_force_graph` /
   `plot_vehicle_max_speed_vs_time`.
-- **Not yet wired:** Range analysis (multi-panel — `apply_graph_style` only
-  touches one axis). It intentionally has no `graph_settings` entry.
+- **Range analysis is wired differently (2026-07):** it's multi-panel, so
+  `RangeAnalysisMixin._range_apply_gs()` walks `self.figure.axes` (skipping
+  colorbars and the loss panel's `twinx` %-axis via `patch.get_visible()`)
+  and applies **only the settings the user has actually touched** (checked
+  against `self._gs_values`) — the stock panels deliberately differ in grid
+  alpha / font size, so untouched settings must not restyle them. The
+  eff-map panel's `cmap`/`fill_levels`/`line_levels`/`map_alpha` are read in
+  `_plot_range_efficiency_map_panel` with the original hard-coded values as
+  defaults. Keep that touched-only contract when adding Range settings.
 - **Compare Standard Motor Data** (2026-07) has its own vehicle/motor/sim/env
   inputs and a `graph_settings` entry, added because that analysis previously
   showed only the `compare_std` section — the user had no way to edit mass,
@@ -603,10 +702,17 @@ checklist popup (`_open_report_picker`) listing every key in
 nothing to wire here), defaulting to just the analysis currently active; the
 user can select any subset or "Select All".
 
-**One report section per plot, not per analysis.** `_render_report_views(
-analysis)` is the per-analysis dispatcher — explicit branches on purpose (not
-a generic loop), because each analysis's "views" are controlled by completely
-different widgets:
+**One report section per plot, not per analysis — the FULL view hierarchy
+(2026-07).** `_render_report_views(analysis)` is the per-analysis dispatcher —
+explicit branches on purpose (not a generic loop), because each analysis's
+"views" are controlled by completely different widgets. It now returns
+**3-tuples `(subtitle, b64_png, summary_override)`**: `summary_override` is
+None except where a view needs its own summary block (Mechanical Design —
+the results label AND active-check inputs change per check, so each of its
+five views carries both; the generator uses the override verbatim and skips
+the generic per-analysis summary/inputs for that view). Any widget a branch
+drives (`parametric_graph_combo`, `range_plot_toggle`, `mech_check_combo`,
+the BOM combos) is snapshotted and restored inside that branch's `finally`:
 - **Powertrain Sizing**: Torque (At Wheel) always; Torque (At Motor) too, but
   *only* when the gear ratio isn't 1:1 (wheel and motor numbers are otherwise
   identical, so a second view would be a duplicate); Force (always wheel-only
@@ -630,24 +736,63 @@ different widgets:
   at least one motor is selected); Efficiency Map too, if the current session
   has a Motor map loaded *and* the selected motor(s) include a saved one
   (see §7e).
-- **Motor BOM**: Sankey (Cost), Sankey (Weight), Pareto (Cost), and Compare
-  A vs B (Cost) when BOM B is loaded — the BOM view/metric combos are set per
-  snapshot and restored in a `finally`.
-- **Everything else** (Acceleration, Parametric Study, Engine analysis, Range
-  analysis, MTPA/MTPV, Mechanical Design): one view via plain `update_plot()`.
-  Range and MTPA already default to their "All" multi-panel dashboard, so one
-  view is already comprehensive for those; Mechanical Design reports the
-  currently selected Design Check's plot + inputs.
+- **Motor BOM**: Sankey (Cost/Weight), Pareto (Cost/Weight), Group Split
+  (Cost), and Compare A vs B (Cost) when BOM B is loaded.
+- **Parametric Study**: one section per study type — all nine
+  `parametric_graph_combo` values are rendered in order.
+- **Range analysis**: every individual panel view (Power, Energy, C-rate,
+  Loss, Waterfall, Drive, M Eff, C Eff); "All" is skipped because it's the
+  first four tiled smaller in one figure. Placeholder when no drive cycle.
+- **Mechanical Design**: all five Design Checks, each with its own
+  per-check summary+inputs via `summary_override` (see above).
+- **Everything else** (Acceleration, Engine analysis, MTPA/MTPV): one view
+  via plain `update_plot()`. MTPA already defaults to its "All" multi-panel
+  dashboard, so one view is comprehensive there.
 
-**Inputs come first.** `_report_core_inputs_html()` builds one table of the
-shared vehicle/motor inputs (mass, Crr/CdA, gear ratio, wheel radius, peak
-torque/power, gradients, ...) — read once and shown at the very top of the
+**Inputs come first, then assumptions (2026-07).** `_report_core_inputs_html()`
+builds one table of the shared vehicle/motor inputs (mass, Crr/CdA, gear
+ratio + efficiency, wheel radius, peak torque/power, gradients *with the
+selected unit*, battery-limit evaluation mode, thermal load points, map
+loaded/not-loaded status, ...) — read once and shown at the very top of the
 report (`id="inputs"`, before the table of contents), not repeated per
-section. `_report_analysis_inputs_html(analysis)` adds a second, small inputs
+section. `_report_assumptions_html()` follows as its own card
+(`id="assumptions"`): a bullet list generated from the **current**
+toggles/inputs (Crr/CdA source, air-density mode, Crr1, gradient unit,
+wheel inertia, efficiency sources, battery-limit mode, integration method,
+regen cap, aux load, pack config, peak:rated ratio) — never boilerplate that
+could contradict the run. `_report_observations_html(analysis)` appends an
+"Engineering observations" box to each analysis's **first** view: sentences
+computed from live data (`_report_vehicle_capability()` reuses the
+Parametric estimators for top speed / gradability / 0-target time; thermal
+points are checked against peak capability; Drive Cycle stats, Drive Cycle
+Efficiency `_last_dce_metrics`, Range `_last_range_metrics` top loss
+contributors, BOM totals). Anything unavailable is silently omitted — never
+fabricate a number there. `_report_analysis_inputs_html(analysis)` adds a second, small inputs
 block for analyses with their own separate input model that the shared table
 doesn't cover (MTPA/MTPV's d-q parameters, Mechanical Design's active
 Design-Check widgets via `_mech_report_input_rows()`); it's prepended to
 that analysis's *first* section only.
+
+**Per-view engineering interpretation (`report_insights.py`, 2026-07).**
+Every captured figure gets an "Engineering interpretation" block (What this
+shows / Why it matters / Key observations / Design implications) built by
+`report_insights.view_interpretation_html(app, analysis, subtitle)`, called
+inside `snap()` AT CAPTURE TIME so view-specific widget state (Parametric
+study type, Range panel, Design Check) is still active — `snap` therefore
+appends 4-tuples `(subtitle, b64, summary_override, interp)`. Ground rules
+for that module: every quoted number must come from the app's own inputs or
+just-computed results (the `_last_parametric` stash written by
+`_mark_current_param_1d`/`_draw_parametric_contour`, the battery-utilization
+keys added to `_last_range_metrics` — peak/avg battery power, peak C-rate,
+accel-vs-cruise energy split — `_report_vehicle_capability()`, the
+estimators, `_last_dce_metrics`, the loaded dataframes); drop a sentence
+rather than invent a value; a failed builder returns "" and the figure ships
+without interpretation. When a first view HAS an interpretation, the older
+`_report_observations_html` box is suppressed for that analysis (the
+interpretation supersedes it); analyses returning "" keep the old fallback.
+The report also forces the `extrapolate_gaps` Graph Setting ON during the
+Drive Cycle Efficiency and Range captures (restored in `finally`) so map
+figures render as smooth fields.
 
 Per-view numeric summaries still come from `_REPORT_LABEL_ATTRS[analysis]`
 (the relevant `*_results_label` / `params_label` widget(s); Range analysis

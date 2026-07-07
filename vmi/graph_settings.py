@@ -162,6 +162,31 @@ SCHEMA = {
             _f("title_size", "int", "Title font size", 14),
             _f("label_size", "int", "Axis label size", 12),
         ],
+    # Range analysis is multi-panel; settings are applied per panel by
+    # _range_apply_gs (range_analysis.py), and ONLY the settings the user
+    # has actually touched are applied -- the stock panels deliberately use
+    # different grid alphas / font sizes, so a blanket apply would change
+    # the default look. The eff-map colormap/levels/opacity are read inside
+    # _plot_range_efficiency_map_panel with the original values as defaults.
+    "Range analysis": [
+        _f("line_width", "width", "Line width", "1.0", WIDTH_CHOICES),
+        _f("cmap", "choice", "Eff-map colormap", "RdYlGn", ["RdYlGn"] + CMAP_CHOICES),
+        _f("fill_levels", "int", "Eff-map filled levels", 40),
+        _f("line_levels", "int", "Eff-map contour lines", 10),
+        _f("map_alpha", "choice", "Eff-map opacity", "0.75",
+           ["0.4", "0.6", "0.75", "0.9", "1.0"]),
+        # Off by default: fills the Motor/Controller map's own NaN gaps with
+        # the nearest known value and resamples onto a dense 200x200 grid
+        # before masking, so the M Eff / C Eff panels render as a smooth
+        # field instead of a blocky one where a handful of missing datasheet
+        # cells erase whole contourf quads near the capability curve.
+        _f("extrapolate_gaps", "bool", "Extrapolate to envelope (smooth map)", False),
+    ] + _GRID_FIELDS + [
+        _f("show_legend", "bool", "Show legend", True),
+        _f("legend_loc", "choice", "Legend position", "best", LEGEND_CHOICES),
+        _f("title_size", "int", "Title font size", 12),
+        _f("label_size", "int", "Axis label size", 10),
+    ],
     "Drive Cycle Efficiency": [
         _f("cmap", "choice", "Colormap", "viridis", CMAP_CHOICES),
         _f("fill_levels", "int", "Filled contour levels", 50),

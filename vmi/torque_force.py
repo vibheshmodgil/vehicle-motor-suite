@@ -151,12 +151,13 @@ class TorqueForceMixin:
         rated_torque_motor = peak_torque / ratio
         continuous_torque_curve = np.minimum(rated_torque_motor, continuous_power_w / motor_omega)
 
-        # Battery DC limit (optional): the battery can't deliver more than
-        # Vdc*Idc*eta of shaft power, so both curves are clipped to T <= P_cap/w.
-        # No battery fields entered -> cap is None and the curves are untouched.
-        batt_cap_w = self.get_battery_power_cap_w()
-        peak_torque_curve = cap_torque_to_power(peak_torque_curve, motor_omega, batt_cap_w)
-        continuous_torque_curve = cap_torque_to_power(continuous_torque_curve, motor_omega, batt_cap_w)
+        # Battery DC limit (optional): the shaft can't see more power than the
+        # battery delivers through the controller and motor. With efficiency
+        # maps loaded the limit is evaluated AFTER them (T <= Vdc*Idc*eta(T,w)/w
+        # per point); with no maps it's the original constant-eta cap.
+        # No battery fields entered -> the curves are untouched.
+        peak_torque_curve = self.cap_torque_to_battery(peak_torque_curve, speeds_rpm_motor)
+        continuous_torque_curve = self.cap_torque_to_battery(continuous_torque_curve, speeds_rpm_motor)
 
         df_motor = pd.DataFrame({
             "speeds_rpm_motor": speeds_rpm_motor,
@@ -214,11 +215,9 @@ class TorqueForceMixin:
                     motor_rpm_for_interp = x * 60 / (2 * np.pi * wheel_radius) / 3.6 * gear_ratio
 
                 y = np.interp(motor_rpm_for_interp, df_sorted["motor_speed"], df_sorted["motor_torque"])
-                # The uploaded curve is battery-capped too (T <= P_cap/w); the
-                # continuous curve below inherits the cap via the division.
-                y = cap_torque_to_power(
-                    y, np.maximum(np.asarray(motor_rpm_for_interp, dtype=float) * 2 * np.pi / 60, 1e-6),
-                    batt_cap_w)
+                # The uploaded curve is battery-capped too; the continuous
+                # curve below inherits the cap via the division.
+                y = self.cap_torque_to_battery(y, motor_rpm_for_interp)
                 # Rated/continuous from the UPLOADED curve / ratio -- the Excel
                 # peak curve replaces the theoretical one, so the manual Peak
                 # Torque entry must not drive the continuous curve (it made
@@ -229,7 +228,7 @@ class TorqueForceMixin:
 
                 for gradient in gradients:
                     y_resist = df_motor[f"motor_resistive_torque_{gradient}"]
-                    self.ax.plot(x, y_resist, label=f"Gradient {gradient}%", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
+                    self.ax.plot(x, y_resist, label=f"Gradient {self.fmt_gradient(gradient)}", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
                     peak_int_x += [p[0] for p in self._annotate_intersections(x, y, y_resist, x_label, "Nm", "red")]
                     if show_continuous:
                         self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
@@ -254,9 +253,7 @@ class TorqueForceMixin:
 
                 y_motor_curve = np.interp(motor_rpm, df_sorted["motor_speed"], df_sorted["motor_torque"])
                 # Battery cap is applied at the motor shaft, then scaled to the wheel.
-                y_motor_curve = cap_torque_to_power(
-                    y_motor_curve, np.maximum(np.asarray(motor_rpm, dtype=float) * 2 * np.pi / 60, 1e-6),
-                    batt_cap_w)
+                y_motor_curve = self.cap_torque_to_battery(y_motor_curve, motor_rpm)
                 y = y_motor_curve * wheel_drive_scale
                 # Same fix as the At-Motor branch: continuous = uploaded peak
                 # curve / ratio (already scaled to the wheel here).
@@ -266,7 +263,7 @@ class TorqueForceMixin:
 
                 for gradient in gradients:
                     y_resist = df_motor[f"wheel_resistive_torque_{gradient}"]
-                    self.ax.plot(x, y_resist, label=f"Gradient {gradient}%", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
+                    self.ax.plot(x, y_resist, label=f"Gradient {self.fmt_gradient(gradient)}", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
                     peak_int_x += [p[0] for p in self._annotate_intersections(x, y, y_resist, x_label, "Nm", "red")]
                     if show_continuous:
                         self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
@@ -295,7 +292,7 @@ class TorqueForceMixin:
 
                 for gradient in gradients:
                     y_resist = df_motor[f"motor_resistive_torque_{gradient}"]
-                    self.ax.plot(x, y_resist, label=f"Motor Resistive Torque (Gradient {gradient}%)", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
+                    self.ax.plot(x, y_resist, label=f"Motor Resistive Torque (Gradient {self.fmt_gradient(gradient)})", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
                     peak_int_x += [p[0] for p in self._annotate_intersections(x, y, y_resist, x_label, "Nm", "red")]
                     if show_continuous:
                         self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
@@ -323,7 +320,7 @@ class TorqueForceMixin:
 
                 for gradient in gradients:
                     y_resist = df_motor[f"wheel_resistive_torque_{gradient}"]
-                    self.ax.plot(x, y_resist, label=f"Gradient {gradient}%", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
+                    self.ax.plot(x, y_resist, label=f"Gradient {self.fmt_gradient(gradient)}", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
                     peak_int_x += [p[0] for p in self._annotate_intersections(x, y, y_resist, x_label, "Nm", "red")]
                     if show_continuous:
                         self._annotate_intersections(x, y_cont, y_resist, x_label, "Nm", "darkorange")
@@ -336,6 +333,11 @@ class TorqueForceMixin:
                     self.ax.plot(x, y, color=peak_c, linestyle=peak_ls, linewidth=peak_lw)
                     if show_continuous:
                         self.ax.plot(x, y_cont, color=cont_c, linestyle=cont_ls, linewidth=cont_lw)
+
+        # Thermal load points overlay (Powertrain Sizing only -- the section
+        # lives there; Compare Std reuses this method and shouldn't inherit it).
+        if analysis_type == "Powertrain Sizing":
+            self._overlay_thermal_points_torque(plot_part, speed_unit, gear_ratio)
 
         # Trim the dead space past the last useful intersection (auto mode only).
         if speed_unit == "RPM":
@@ -358,6 +360,40 @@ class TorqueForceMixin:
         if overlay_std:
             self.canvas.draw()
 
+
+    def _overlay_thermal_points_torque(self, plot_part, speed_unit, gear_ratio):
+        """Overlay the thermal-load duty points on the torque plot, converted
+        to the current x unit (km/h / wheel RPM / motor RPM) and torque side
+        (motor vs wheel). Each marker is annotated with its index and its
+        time-at-condition. Fail-soft: no points -> draws nothing."""
+        fn = getattr(self, "compute_thermal_load_points", None)
+        if not callable(fn):
+            return
+        try:
+            pts = fn() or []
+        except Exception:
+            return
+        first = True
+        for i, p in enumerate(pts, 1):
+            if speed_unit == "RPM":
+                if plot_part == "At Motor":
+                    x = p["motor_rpm"]
+                else:
+                    x = p["motor_rpm"] / max(abs(gear_ratio), 1e-9)
+            else:
+                x = p["v_kmh"]
+            y = p["motor_torque"] if plot_part == "At Motor" else p["wheel_torque"]
+            self.ax.scatter(
+                x, y, marker="X", s=110, color="crimson",
+                edgecolors="white", linewidths=0.8, zorder=7,
+                label="Thermal load points" if first else None)
+            self.ax.annotate(
+                f"{i}: {p['duration_s']:g}s", xy=(x, y), xytext=(7, 7),
+                textcoords="offset points", fontsize=8, color="crimson",
+                fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="crimson",
+                          alpha=0.8))
+            first = False
 
     def plot_force_graph(
         self,
@@ -439,11 +475,11 @@ class TorqueForceMixin:
             rated_torque_motor = peak_torque / ratio
             continuous_motor_torque_curve = np.minimum(rated_torque_motor, continuous_power_w / motor_omega)
 
-        # Battery DC limit (optional): both curves clipped to T <= P_cap/w at
-        # the motor shaft before scaling to the wheel. None -> untouched.
-        batt_cap_w = self.get_battery_power_cap_w()
-        peak_motor_torque_curve = cap_torque_to_power(peak_motor_torque_curve, motor_omega, batt_cap_w)
-        continuous_motor_torque_curve = cap_torque_to_power(continuous_motor_torque_curve, motor_omega, batt_cap_w)
+        # Battery DC limit (optional): both curves clipped at the motor shaft
+        # before scaling to the wheel (map-aware when the efficiency maps are
+        # loaded -- see cap_torque_to_battery). None -> untouched.
+        peak_motor_torque_curve = self.cap_torque_to_battery(peak_motor_torque_curve, speeds_rpm_motor)
+        continuous_motor_torque_curve = self.cap_torque_to_battery(continuous_motor_torque_curve, speeds_rpm_motor)
 
         peak_wheel_torque_curve = peak_motor_torque_curve * wheel_drive_scale
         continuous_wheel_torque_curve = continuous_motor_torque_curve * wheel_drive_scale
@@ -522,7 +558,7 @@ class TorqueForceMixin:
                 ],
                 dtype=float,
             )
-            self.ax.plot(x_resist, wheel_forces, label=f"Gradient {gradient}%", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
+            self.ax.plot(x_resist, wheel_forces, label=f"Gradient {self.fmt_gradient(gradient)}", linestyle=grad_ls, linewidth=grad_lw, **grad_ckw)
 
             peak_force_interp = np.interp(speeds, vehicle_speeds_kmh, peak_force_curve)
             continuous_force_interp = np.interp(speeds, vehicle_speeds_kmh, continuous_force_curve)
@@ -597,10 +633,9 @@ class TorqueForceMixin:
                 peak_power_w / ((speeds_rpm * 2 * np.pi) / 60)  # T = P / Ï‰
             )
 
-        # Battery DC limit (optional): available torque clipped to T <= P_cap/w.
-        torque_values = cap_torque_to_power(
-            torque_values, np.maximum(speeds_rpm * 2 * np.pi / 60, 1e-6),
-            self.get_battery_power_cap_w())
+        # Battery DC limit (optional): available torque clipped (map-aware
+        # when the efficiency maps are loaded).
+        torque_values = self.cap_torque_to_battery(torque_values, speeds_rpm)
 
         # Calculate max wheel force (includes gear efficiency)
         gear_eff = self.get_gear_efficiency_value()

@@ -100,7 +100,7 @@ class CompareStdMixin:
                 crr=crr if self.crr_manual else None,
                 cd_a=cd_a if self.cda_manual else None,
             )
-            gradients = [float(g.strip()) for g in self.gradients.get().split(",")]
+            gradients = self.get_gradients_pct()
             wheel_radius = float(self.wheel_radius.get())
             peak_torque = float(self.peak_torque.get())
             peak_power = float(self.peak_power.get())
@@ -154,8 +154,8 @@ class CompareStdMixin:
         # y_data_list = []
         # Battery DC limit (optional): the battery is a property of the
         # VEHICLE, so the same shaft-power cap clips every saved motor's
-        # curve too, not just the current motor's. None -> untouched.
-        batt_cap_w = self.get_battery_power_cap_w()
+        # curve too, not just the current motor's (map-aware when the
+        # session's efficiency maps are loaded). None -> untouched.
         for entry in self.selected_std_motors:
             name = entry["name"]
             std_gear_ratio = float(entry["gear_ratio"])
@@ -173,8 +173,7 @@ class CompareStdMixin:
                 
                 # Plot torque vs speed (at wheel or motor)
                 interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
-                interp_torque = cap_torque_to_power(
-                    interp_torque, np.maximum(speeds_rpm_motor * 2 * np.pi / 60, 1e-6), batt_cap_w)
+                interp_torque = self.cap_torque_to_battery(interp_torque, speeds_rpm_motor)
                 if mode == "Wheel":
                     y = interp_torque * std_gear_ratio * gear_eff
                     label = f"{name} (Wheel)"
@@ -213,8 +212,7 @@ class CompareStdMixin:
             elif plot_type == "force":
                 # F = (torque * gear_ratio) / wheel_radius
                 interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
-                interp_torque = cap_torque_to_power(
-                    interp_torque, np.maximum(speeds_rpm_motor * 2 * np.pi / 60, 1e-6), batt_cap_w)
+                interp_torque = self.cap_torque_to_battery(interp_torque, speeds_rpm_motor)
                 force = (interp_torque * std_gear_ratio * gear_eff) / wheel_radius
                 y=force
                 y_data_list.append(y)
@@ -230,8 +228,7 @@ class CompareStdMixin:
                 speeds_rpm_wheel = speeds_mps * 60 / (2 * np.pi * std_wheel_radius)
                 speeds_rpm_motor = speeds_rpm_wheel * std_gear_ratio
                 interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
-                interp_torque = cap_torque_to_power(
-                    interp_torque, np.maximum(speeds_rpm_motor * 2 * np.pi / 60, 1e-6), batt_cap_w)
+                interp_torque = self.cap_torque_to_battery(interp_torque, speeds_rpm_motor)
                 max_wheel_force = interp_torque * std_gear_ratio * gear_eff / std_wheel_radius
                 wheel_forces = np.array([
                     params['m_i'] * g * params['Crr'] +

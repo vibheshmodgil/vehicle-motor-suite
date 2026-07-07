@@ -103,7 +103,11 @@ class EnhancementsMixin:
         self._dark_mode = False
         self._debug = getattr(self, "_debug", False)
 
-        # Wrap canvas.draw / draw_idle so dark mode applies to *every* plot.
+        # Wrap canvas.draw / draw_idle so dark mode applies to *every* plot,
+        # and so the figure layout is re-fitted on every draw. The layout
+        # refit is what keeps axis labels / tick numbers visible when the
+        # window is resized or the side panels are dragged wider: without it
+        # a shrinking canvas clips the outermost labels behind the panels.
         if hasattr(self, "canvas") and not getattr(self, "_draw_wrapped", False):
             for name in ("draw", "draw_idle"):
                 orig = getattr(self.canvas, name, None)
@@ -112,6 +116,16 @@ class EnhancementsMixin:
 
                 def make(orig_fn):
                     def wrapped(*a, **k):
+                        try:
+                            import warnings
+                            with warnings.catch_warnings():
+                                # tight_layout warns (but still lays out the
+                                # compatible axes) when a figure contains
+                                # manually placed axes; that's fine here.
+                                warnings.simplefilter("ignore")
+                                self.figure.tight_layout()
+                        except Exception:
+                            pass
                         if getattr(self, "_dark_mode", False):
                             try:
                                 theme.apply_dark_to_figure(self.figure)
@@ -121,6 +135,13 @@ class EnhancementsMixin:
                     return wrapped
                 setattr(self.canvas, name, make(orig))
             self._draw_wrapped = True
+            # Re-fit the layout whenever the canvas itself changes size (the
+            # user resizes the window or drags a paned divider), then redraw.
+            try:
+                self.canvas.mpl_connect(
+                    "resize_event", lambda _e: self.canvas.draw_idle())
+            except Exception:
+                pass
 
             # Cursor read-out.
             try:
@@ -421,6 +442,31 @@ class EnhancementsMixin:
         g = self._report_widget_text
         crr = g("crr")
         cd_a = g("cd_a")
+        grad_unit = ("degrees (°)"
+                     if hasattr(self, "gradient_unit_is_degrees")
+                     and self.gradient_unit_is_degrees() else "percent (%)")
+        have_m_map = getattr(self, "eff1_map_matrix", None) is not None
+        have_c_map = getattr(self, "eff2_map_matrix", None) is not None
+        batt_v, batt_i = g("batt_voltage"), g("batt_current_limit")
+        batt_smooth_on = False
+        try:
+            batt_smooth_on = bool(self.battery_eff_smoothing_switch.get())
+        except Exception:
+            pass
+        if not batt_v or not batt_i:
+            batt_mode = "No battery DC limit (fields blank)"
+        elif have_m_map or have_c_map:
+            batt_mode = ("Map-aware: shaft cap = Vdc·Idc·η_motor(T,ω)·η_controller(T,ω), "
+                         "solved per operating point"
+                         + (" (map smoothed for this lookup)" if batt_smooth_on else ""))
+        else:
+            batt_mode = (f"Constant chain: shaft cap = Vdc·Idc·η with "
+                         f"η = {g('batt_to_shaft_eff') or '1.0'} (no efficiency maps loaded)")
+        thermal_on = False
+        try:
+            thermal_on = bool(self.thermal_overlay_switch.get())
+        except Exception:
+            pass
         rows = [
             ("Reference Mass (kg)", g("m_ref")),
             ("Rear Load Ratio", g("rear_load_ratio")),
@@ -428,7 +474,9 @@ class EnhancementsMixin:
             ("Ambient Pressure (kPa)", g("ambient_pressure")),
             ("Crr", crr if crr else "(auto-estimated from mass)"),
             ("CdA (m²)", f"{cd_a} m²" if cd_a else "(auto-estimated from mass)"),
+            ("Crr Speed Coefficient Crr1 (per m/s)", g("crr_speed_coeff") or "0 (constant Crr)"),
             ("Gear Ratio", g("gear_ratio")),
+            ("Gear Efficiency", g("gear_efficiency")),
             ("Wheel Radius (m)", g("wheel_radius")),
             ("Peak Torque (Nm)", g("peak_torque")),
             ("Peak Power (kW)", g("peak_power")),
@@ -437,8 +485,12 @@ class EnhancementsMixin:
             ("Wheel Inertia (kg·m², total)", g("wheel_inertia") or "0 (ignored)"),
             ("Battery Voltage (V)", g("batt_voltage") or "(no DC limit)"),
             ("Battery DC Current Limit (A)", g("batt_current_limit") or "(no DC limit)"),
-            ("Battery-to-Shaft Efficiency", g("batt_to_shaft_eff")),
-            ("Gradients (%)", g("gradients")),
+            ("Battery Limit Evaluation", batt_mode),
+            (f"Gradients ({grad_unit})", g("gradients")),
+            ("Thermal Load Points (grad, speed, s)",
+             (g("thermal_points") or "(none)") if thermal_on else "(overlay off)"),
+            ("Motor Efficiency Map", "Uploaded" if have_m_map else "Not loaded (constant used)"),
+            ("Controller Efficiency Map", "Uploaded" if have_c_map else "Not loaded (constant used)"),
             ("Speed Unit", g("speed_unit_combo")),
             ("Output (Torque / Force)", g("output_combo")),
             ("Motor Curve Source",
@@ -480,34 +532,391 @@ class EnhancementsMixin:
             return f"<p><strong>Analysis inputs</strong></p><table><tbody>{trs}</tbody></table>"
         return ""
 
+    # ---- assumptions + engineering observations ------------------------- #
+    def _report_assumptions_html(self):
+        """The model assumptions this run actually used, generated from the
+        current toggles/inputs rather than boilerplate, so the report states
+        what the numbers really assume."""
+        g = self._report_widget_text
+        items = [
+            "Quasi-steady longitudinal vehicle model: "
+            "F = m·g·Crr·cosθ + ½·ρ·CdA·v² + m·g·sinθ + m·a. No wind, tyre "
+            "slip, cornering losses, or road-surface variation are modeled.",
+        ]
+        crr_src = ("entered manually" if getattr(self, "crr_manual", False)
+                   else "estimated from the calibrated reference-mass lookup")
+        cda_src = ("entered manually" if getattr(self, "cda_manual", False)
+                   else "estimated from the calibrated reference-mass lookup "
+                        "(temperature/pressure corrected)")
+        items.append(f"Crr is {crr_src}; CdA is {cda_src}.")
+        alt_on = False
+        try:
+            alt_on = bool(self.alt_density_toggle.get())
+        except Exception:
+            pass
+        if alt_on:
+            items.append(
+                f"Air density: ISA model at altitude {g('altitude_m') or '0'} m "
+                "and the ambient-temperature input (applies to Range / Drive "
+                "Cycle Efficiency; capability plots keep ρ = 1.225 kg/m³).")
+        else:
+            items.append("Air density fixed at ρ = 1.225 kg/m³ (sea level, 15 °C).")
+        crr1 = g("crr_speed_coeff")
+        try:
+            crr1_active = bool(crr1) and abs(float(crr1)) > 0
+        except Exception:
+            crr1_active = False
+        if crr1_active:
+            items.append(f"Velocity-dependent rolling resistance: Crr(v) = Crr + {crr1}·v (v in m/s).")
+        else:
+            items.append("Rolling-resistance coefficient is constant with speed (Crr1 = 0).")
+        grad_deg = (hasattr(self, "gradient_unit_is_degrees")
+                    and self.gradient_unit_is_degrees())
+        items.append(
+            "Gradients are entered in "
+            + ("degrees and converted internally to slope percent (tan θ · 100)"
+               if grad_deg else "slope percent (rise/run × 100)")
+            + "; the physics uses θ = arctan(grade%/100).")
+        items.append(
+            f"Single fixed reduction: gear ratio {g('gear_ratio') or '1'}:1 at "
+            f"transmission efficiency {g('gear_efficiency') or '1'}.")
+        wheel_j = g("wheel_inertia")
+        try:
+            j_active = bool(wheel_j) and float(wheel_j) > 0
+        except Exception:
+            j_active = False
+        if j_active:
+            items.append(
+                f"Wheel rotational inertia J = {wheel_j} kg·m² adds J/r² of "
+                "translational-equivalent mass to the inertial (m·a) terms only; "
+                "steady-state results are unaffected.")
+        else:
+            items.append("Rotating-mass inertia is neglected (Wheel Inertia J = 0).")
+        have_m_map = getattr(self, "eff1_map_matrix", None) is not None
+        have_c_map = getattr(self, "eff2_map_matrix", None) is not None
+        items.append(
+            "Motor efficiency: " + ("uploaded map" if have_m_map else
+                                    f"constant {g('motor_eff_const') or '0.90'}")
+            + "; controller efficiency: "
+            + ("uploaded map" if have_c_map else f"constant {g('controller_eff_const') or '0.95'}")
+            + ". Braking/regen re-uses the motoring efficiency at |T| "
+              "(no separate regen map is measured on datasheets).")
+        batt_v, batt_i = g("batt_voltage"), g("batt_current_limit")
+        if batt_v and batt_i:
+            if have_m_map or have_c_map:
+                batt_smooth_on = False
+                try:
+                    batt_smooth_on = bool(self.battery_eff_smoothing_switch.get())
+                except Exception:
+                    pass
+                items.append(
+                    f"Battery DC limit {batt_v} V × {batt_i} A evaluated AFTER the "
+                    "efficiency maps: shaft torque satisfies |T|·ω ≤ "
+                    "Vdc·Idc·η_motor(T,ω)·η_controller(T,ω) at every point of every "
+                    "capability curve. Demand curves (drive cycle, range) are not clipped."
+                    + (" The map's blank (NaN) coverage gaps are filled and blended "
+                       "for this lookup only (Smooth Map for Battery Limit is ON); "
+                       "measured cells keep their exact values, so real features such "
+                       "as the base-speed corner stay sharp while the coverage edge "
+                       "no longer produces an abrupt efficiency cliff in the capped curve."
+                       if batt_smooth_on else
+                       " Smooth Map for Battery Limit is OFF: a NaN-holed map can show "
+                       "a visible step in the capped curve right at its coverage edge — "
+                       "turn the toggle on if that looks wrong."))
+            else:
+                items.append(
+                    f"Battery DC limit {batt_v} V × {batt_i} A with constant "
+                    f"battery-to-shaft efficiency {g('batt_to_shaft_eff') or '1.0'} "
+                    "(no efficiency maps loaded). Demand curves are not clipped.")
+        else:
+            items.append("No battery DC power limit applied (fields left blank).")
+        trap = False
+        try:
+            trap = str(self.integration_method.get()).lower().startswith("trap")
+        except Exception:
+            pass
+        items.append("Drive-cycle energy integrated "
+                     + ("trapezoidally over the time vector."
+                        if trap else "by rectangular cumulative sum (original method)."))
+        cap = g("regen_cap_w")
+        items.append(f"Regenerative braking capped at {cap} W battery acceptance."
+                     if cap else "Regenerative braking acceptance is uncapped.")
+        items.append(f"Auxiliary electrical load of {g('aux_loss') or '25'} W "
+                     "is drawn during motoring only.")
+        try:
+            s, p = g("cells_series"), g("cells_parallel")
+            v, ah, dod = g("cell_voltage"), g("cell_capacity"), g("dod")
+            if s and p:
+                items.append(
+                    f"Battery pack {s}s{p}p, cell {v} V × {ah} Ah; usable energy "
+                    f"= pack energy × DoD {dod}%.")
+        except Exception:
+            pass
+        items.append(
+            f"Continuous (rated) torque taken as peak torque / "
+            f"{g('peak_to_rated_torque_ratio') or '2'} (thermal steady-state assumed).")
+        lis = "".join(f"<li>{i}</li>" for i in items)
+        return f"<ul>{lis}</ul>"
+
+    def _report_vehicle_capability(self):
+        """Flat-road top speed, max startable gradient and 0-target time from
+        the CURRENT inputs, using the same estimators the Parametric Study
+        uses (so the observations agree with the plots). None when the
+        vehicle/motor inputs don't parse."""
+        try:
+            from .physics import calculate_crr_cd_a
+            crr_txt = self.crr.get().strip()
+            cda_txt = self.cd_a.get().strip()
+            params = calculate_crr_cd_a(
+                float(self.m_ref.get()), float(self.rear_load_ratio.get()),
+                float(self.ambient_temp.get()), float(self.ambient_pressure.get()),
+                crr=float(crr_txt) if (getattr(self, "crr_manual", False) and crr_txt) else None,
+                cd_a=float(cda_txt) if (getattr(self, "cda_manual", False) and cda_txt) else None,
+            )
+            wheel_radius = float(self.wheel_radius.get())
+            gear_ratio = float(self.gear_ratio.get())
+            peak_torque = float(self.peak_torque.get())
+            peak_power = float(self.peak_power.get())
+            speeds = np.linspace(0.1, 160.0, 2000)
+            force = self._compute_available_wheel_force(
+                speeds, wheel_radius, peak_torque, peak_power, gear_ratio)
+            mass = float(params["m_i"])
+            top = self._estimate_top_speed(speeds, force, mass, params["Crr"], params["CdA"])
+            grad = self._estimate_max_gradability(
+                speeds, force, mass, params["Crr"], params["CdA"], 60.0, 0.5)
+            try:
+                target = float(self.target_speed.get())
+                t_max = float(self.max_time.get())
+            except Exception:
+                target, t_max = 60.0, 60.0
+            accel_t = self._estimate_acceleration_time(
+                speeds, force, mass, params["Crr"], params["CdA"], target, t_max)
+            return dict(top_speed_kmh=float(top), max_grad_pct=float(grad),
+                        accel_target_kmh=target, accel_time_s=accel_t,
+                        speeds=speeds, force=force, params=params,
+                        wheel_radius=wheel_radius, gear_ratio=gear_ratio)
+        except Exception:
+            return None
+
+    _CAPABILITY_ANALYSES = ("Powertrain Sizing", "Acceleration",
+                            "Parametric Study", "Compare Standard Motor Data")
+
+    def _report_observations(self, analysis):
+        """Engineering observations for one analysis, as plain sentences
+        derived from the currently loaded data. Only states what the model
+        actually computed; anything unavailable is simply omitted."""
+        obs = []
+        if analysis in self._CAPABILITY_ANALYSES:
+            cap = self._report_vehicle_capability()
+            if cap:
+                from .units import gradient_pct_to_deg
+                if cap["top_speed_kmh"] > 0:
+                    obs.append(
+                        f"Estimated flat-road top speed ≈ {cap['top_speed_kmh']:.1f} km/h "
+                        "(peak capability curve vs. total resistive force).")
+                obs.append(
+                    f"Maximum startable gradient ≈ {cap['max_grad_pct']:.1f}% "
+                    f"({gradient_pct_to_deg(cap['max_grad_pct']):.1f}°) with the peak curve.")
+                t = cap["accel_time_s"]
+                if t is not None and np.isfinite(t):
+                    obs.append(
+                        f"0–{cap['accel_target_kmh']:.0f} km/h in ≈ {t:.1f} s "
+                        "(flat road, peak torque available).")
+                else:
+                    obs.append(
+                        f"The target speed of {cap['accel_target_kmh']:.0f} km/h is not "
+                        "reached within the simulation window on flat road.")
+                p_dc = None
+                try:
+                    p_dc = self.get_battery_dc_power_w()
+                except Exception:
+                    pass
+                if p_dc is not None:
+                    mode = ("evaluated through the motor × controller efficiency maps"
+                            if (getattr(self, "eff1_map_matrix", None) is not None
+                                or getattr(self, "eff2_map_matrix", None) is not None)
+                            else "with the constant battery-to-shaft efficiency")
+                    obs.append(
+                        f"Battery DC limit active: {p_dc / 1000.0:.2f} kW DC, {mode}; "
+                        "high-speed capability may be battery-limited rather than "
+                        "motor-limited.")
+                # Thermal duty points vs. available capability.
+                try:
+                    pts = self.compute_thermal_load_points()
+                except Exception:
+                    pts = []
+                for i, p in enumerate(pts, 1):
+                    avail_wheel_force = float(np.interp(
+                        p["v_kmh"], cap["speeds"], cap["force"]))
+                    avail_wheel_tq = avail_wheel_force * cap["wheel_radius"]
+                    if avail_wheel_tq > 1e-9:
+                        util = 100.0 * p["wheel_torque"] / avail_wheel_tq
+                        verdict = ("EXCEEDS peak capability" if util > 100.0
+                                   else f"uses {util:.0f}% of peak capability")
+                        obs.append(
+                            f"Thermal load point {i} "
+                            f"({self.fmt_gradient(p['grad_pct'])} @ {p['v_kmh']:.0f} km/h "
+                            f"for {p['duration_s']:g} s) demands {p['motor_torque']:.1f} Nm "
+                            f"at {p['motor_rpm']:.0f} RPM — {verdict}.")
+
+        elif analysis == "Drive Cycle":
+            df_dc = getattr(self, "dataframe", None)
+            if df_dc is not None and "dc_time" in df_dc and "dc_speed" in df_dc:
+                try:
+                    t = np.asarray(df_dc["dc_time"], dtype=float)
+                    v = np.asarray(df_dc["dc_speed"], dtype=float)
+                    ok = np.isfinite(t) & np.isfinite(v)
+                    t, v = t[ok], v[ok]
+                    if t.size > 2:
+                        dur = float(t[-1] - t[0])
+                        v_mps = v / 3.6
+                        dist_km = float(np.trapz(v_mps, t) / 1000.0)
+                        acc = np.diff(v_mps) / np.maximum(np.diff(t), 1e-9)
+                        obs.append(
+                            f"Cycle: {dur:.0f} s, {dist_km:.2f} km, "
+                            f"v_max {np.max(v):.1f} km/h, v_avg {np.mean(v):.1f} km/h, "
+                            f"idle share {100.0 * np.mean(v < 0.5):.0f}%.")
+                        obs.append(
+                            f"Peak acceleration {np.max(acc):.2f} m/s², "
+                            f"peak deceleration {abs(np.min(acc)):.2f} m/s² — the "
+                            "torque-speed scatter/heatmap shows where these demands "
+                            "sit on the motor map.")
+                except Exception:
+                    pass
+
+        elif analysis == "Drive Cycle Efficiency":
+            m = getattr(self, "_last_dce_metrics", None)
+            if m:
+                try:
+                    obs.append(
+                        f"Energy-weighted drive-cycle efficiency (motor × controller) "
+                        f"= {m['energy_eff']:.1f}%; unweighted average over motoring "
+                        f"points = {m['avg_eff']:.1f}%. A large gap between the two "
+                        "means much of the energy is spent away from the map's sweet spot.")
+                    if m.get("e_batt_in", 0) > 1e-9:
+                        regen_share = 100.0 * m.get("e_regen", 0.0) / m["e_batt_in"]
+                        obs.append(
+                            f"Regen returns {m.get('e_regen', 0.0):.1f} Wh "
+                            f"({regen_share:.1f}% of the motoring battery energy); "
+                            f"net efficiency including regen = {m.get('net_eff', 0.0):.1f}%.")
+                except Exception:
+                    pass
+
+        elif analysis == "Range analysis":
+            m = getattr(self, "_last_range_metrics", None)
+            if m:
+                try:
+                    loss_terms = {
+                        "aerodynamic": m.get("aerodynamic_loss_per_km", 0.0),
+                        "rolling": m.get("rolling_loss_per_km", 0.0),
+                        "grade": m.get("grade_loss_per_km", 0.0),
+                        "inertia": m.get("inertia_loss_motoring_per_km", 0.0),
+                        "transmission": m.get("transmission_loss_per_km", 0.0),
+                        "motor": m.get("motor_loss_per_km", 0.0),
+                        "controller": m.get("controller_loss_per_km", 0.0),
+                        "auxiliary": m.get("aux_loss_total_per_km", 0.0),
+                    }
+                    ranked = sorted(loss_terms.items(), key=lambda kv: kv[1], reverse=True)
+                    gross = m.get("gross_loss_per_km", 0.0)
+                    if gross > 1e-9:
+                        top2 = ", ".join(
+                            f"{k} ({v:.1f} Wh/km, {100.0 * v / gross:.0f}%)"
+                            for k, v in ranked[:2])
+                        obs.append(f"Dominant energy sinks per km: {top2}.")
+                    if m.get("estimated_range_km") is not None:
+                        obs.append(
+                            f"Estimated range {m['estimated_range_km']:.1f} km at a net "
+                            f"consumption of {m.get('net_energy_loss_per_km', 0.0):.1f} Wh/km "
+                            "(net battery draw including the auxiliary load, minus "
+                            "accepted regen).")
+                    regen = m.get("regen_energy_per_km", 0.0)
+                    if gross > 1e-9 and regen > 0:
+                        obs.append(
+                            f"Regen recovers {regen:.1f} Wh/km "
+                            f"({100.0 * regen / gross:.0f}% of gross losses).")
+                    obs.append(
+                        f"Cycle-average efficiencies (motoring): motor "
+                        f"{100.0 * m.get('motor_eff', 0.0):.1f}%, controller "
+                        f"{100.0 * m.get('controller_eff', 0.0):.1f}%, wheel-to-battery "
+                        f"{100.0 * m.get('drive_cycle_eff', 0.0):.1f}%.")
+                except Exception:
+                    pass
+
+        elif analysis == "Motor BOM (Cost & Weight)":
+            tree = getattr(self, "bom_tree", None)
+            if tree is not None:
+                try:
+                    from .bom import node_value
+                    total_cost = node_value(tree, "cost")
+                    total_weight = node_value(tree, "weight")
+                    obs.append(f"Total BOM cost ₹{total_cost:,.0f}; "
+                               f"total weight {total_weight / 1000.0:.2f} kg.")
+                    kids = [(c.get("name", "?"), node_value(c, "cost") * float(tree.get("qty", 1)))
+                            for c in tree.get("children", [])]
+                    if kids and total_cost > 1e-9:
+                        name, val = max(kids, key=lambda kv: kv[1])
+                        obs.append(
+                            f"Largest cost contributor: {name} "
+                            f"(₹{val:,.0f}, {100.0 * val / max(total_cost, 1e-9):.0f}% of total) "
+                            "— see the Pareto view for the full ranking.")
+                except Exception:
+                    pass
+
+        return obs
+
+    def _report_observations_html(self, analysis):
+        try:
+            obs = self._report_observations(analysis) or []
+        except Exception:
+            return ""
+        if not obs:
+            return ""
+        lis = "".join(f"<li>{o}</li>" for o in obs)
+        return ("<div class='obs'><p><strong>Engineering observations</strong></p>"
+                f"<ul>{lis}</ul></div>")
+
     def _render_report_views(self, analysis):
         """Render every distinct plot this analysis contributes to the
-        report. Returns a list of (subtitle, b64_png) tuples -- subtitle is
-        "" for a single-view analysis, in which case the section just uses
-        the analysis name with no suffix.
+        report -- the full view hierarchy the UI itself offers (every
+        Parametric study type, every Range panel, every Mechanical Design
+        check, every efficiency map, ...), not just whichever view happens
+        to be selected. Returns a list of (subtitle, b64_png,
+        summary_override) tuples; subtitle is "" for a single-view analysis
+        and summary_override is None unless the view needs its OWN summary
+        (Mechanical Design: the results label + inputs change per check).
 
         Explicit per-analysis branches on purpose (not a generic loop): each
         analysis's "views" are controlled by completely different widgets
         (Output/Plotting Part combos, the heatmap switch, the map buttons,
-        the Compare radio buttons, ...), so a one-size-fits-all abstraction
-        would just hide what's actually being toggled. If you add a new
-        analysis mode with more than one meaningful view, add a branch here;
-        everything else falls through to the single generic `update_plot()`
-        capture at the bottom.
+        the Compare radio buttons, the Parametric/Range/Design-Check combos,
+        ...), so a one-size-fits-all abstraction would just hide what's
+        actually being toggled. If you add a new analysis mode with more
+        than one meaningful view, add a branch here; everything else falls
+        through to the single generic `update_plot()` capture at the bottom.
         """
         self.plot_type.set(analysis)
         self.plot_mode = analysis
         self.show_sections_for_analysis(analysis)
         out = []
 
-        def snap(subtitle=""):
+        def snap(subtitle="", summary_override=None):
             self.canvas.draw()
             self.update_idletasks()
             png = io.BytesIO()
             self.figure.savefig(png, format="png", dpi=150, bbox_inches="tight",
                                 facecolor=self.figure.get_facecolor())
             png.seek(0)
-            out.append((subtitle, base64.b64encode(png.read()).decode("ascii")))
+            # The engineering interpretation is computed AT CAPTURE TIME so
+            # view-specific state (the Parametric study type, Range panel,
+            # Design Check, ...) is still active. A failed builder returns ""
+            # and the view simply carries no interpretation.
+            try:
+                from .report_insights import view_interpretation_html
+                interp = view_interpretation_html(self, analysis, subtitle)
+            except Exception:
+                interp = ""
+            out.append((subtitle, base64.b64encode(png.read()).decode("ascii"),
+                        summary_override, interp))
 
         if analysis == "Powertrain Sizing":
             # Torque always gets its own view; Force is wheel-only (locked)
@@ -547,22 +956,35 @@ class EnhancementsMixin:
             # This analysis is entirely button-driven in the UI (dispatch's
             # plot_graph has no branch for it), so update_plot() alone would
             # just land on the "Insert Data or Update Plot" placeholder --
-            # each map view has to be called directly.
+            # each map view has to be called directly. For the report the
+            # extrapolate-to-envelope smoothing is forced ON (dense regrid +
+            # gap fill -> publication-quality contours instead of blocky
+            # quads); the user's own Graph Settings value is restored after.
             have1 = getattr(self, "efficiency_data_1", None) is not None
             have2 = getattr(self, "efficiency_data_2", None) is not None
-            if have1:
-                self.plot_efficiency_map_motor1()
-                snap("Motor Efficiency Map")
-                self.plot_efficiency_map_regen()
-                snap("Regen (Braking) Efficiency Map")
-            if have2:
-                self.plot_efficiency_map_motor2()
-                snap("Controller Efficiency Map")
-            if have1 and have2:
-                self.plot_efficiency_map_combined()
-                snap("Combined Efficiency Map (Motor × Controller)")
-                self.plot_efficiency_difference_map()
-                snap("Efficiency Difference Map (Controller − Motor)")
+            _gs_key = ("Drive Cycle Efficiency", "extrapolate_gaps")
+            _had_gs = _gs_key in getattr(self, "_gs_values", {})
+            _prev_gs = self._gs_values.get(_gs_key) if _had_gs else None
+            self._gs_values[_gs_key] = True
+            try:
+                if have1:
+                    self.plot_efficiency_map_motor1()
+                    snap("Motor Efficiency Map")
+                    self.plot_efficiency_map_regen()
+                    snap("Regen (Braking) Efficiency Map")
+                if have2:
+                    self.plot_efficiency_map_motor2()
+                    snap("Controller Efficiency Map")
+                if have1 and have2:
+                    self.plot_efficiency_map_combined()
+                    snap("Combined Efficiency Map (Motor × Controller)")
+                    self.plot_efficiency_difference_map()
+                    snap("Efficiency Difference Map (Controller − Motor)")
+            finally:
+                if _had_gs:
+                    self._gs_values[_gs_key] = _prev_gs
+                else:
+                    self._gs_values.pop(_gs_key, None)
             if not out:
                 self.show_placeholder_message(
                     "Upload the Motor and/or Controller efficiency maps to see this analysis.")
@@ -589,19 +1011,98 @@ class EnhancementsMixin:
                     self.update_compare_std_plot()
                     snap("Efficiency Map")
 
+        elif analysis == "Parametric Study":
+            # One section per study type -- the full hierarchy the combo
+            # offers, not just whichever sweep was last selected.
+            combo = getattr(self, "parametric_graph_combo", None)
+            if combo is None:
+                self.update_plot()
+                snap()
+            else:
+                prev = combo.get()
+                try:
+                    for graph_type in list(combo.cget("values")):
+                        combo.set(graph_type)
+                        self.update_plot()
+                        snap(graph_type)
+                finally:
+                    combo.set(prev)
+
+        elif analysis == "Range analysis":
+            toggle = getattr(self, "range_plot_toggle", None)
+            if toggle is None or getattr(self, "dataframe", None) is None:
+                self.update_plot()
+                snap()
+            else:
+                # Every individual panel; "All" is skipped because it's just
+                # the first four of these tiled smaller in one figure.
+                subtitles = {
+                    "Power": "Power vs Time",
+                    "Energy": "Cumulative Energy vs Time",
+                    "C-rate": "Battery C-rate vs Time",
+                    "Loss": "Component Energy Loss",
+                    "Waterfall": "Loss Waterfall (Wh/km)",
+                    "Drive": "Drive Cycle Panels",
+                    "M Eff": "Motor Efficiency Map",
+                    "C Eff": "Controller Efficiency Map",
+                }
+                prev = toggle.get()
+                # Publication-quality map panels for the report: force the
+                # Range extrapolate/smooth setting on, restore afterwards.
+                _gs_key = ("Range analysis", "extrapolate_gaps")
+                _had_gs = _gs_key in getattr(self, "_gs_values", {})
+                _prev_gs = self._gs_values.get(_gs_key) if _had_gs else None
+                self._gs_values[_gs_key] = True
+                try:
+                    for view in list(toggle.cget("values")):
+                        if view == "All":
+                            continue
+                        toggle.set(view)
+                        self.update_plot()
+                        snap(subtitles.get(view, view))
+                finally:
+                    toggle.set(prev)
+                    if _had_gs:
+                        self._gs_values[_gs_key] = _prev_gs
+                    else:
+                        self._gs_values.pop(_gs_key, None)
+
+        elif analysis == "Mechanical Design (Motor)":
+            combo = getattr(self, "mech_check_combo", None)
+            if combo is None:
+                self.update_plot()
+                snap()
+            else:
+                prev = combo.get()
+                try:
+                    for check in list(combo.cget("values")):
+                        combo.set(check)
+                        self.update_plot()
+                        # The results label AND the active-check inputs change
+                        # per check, so each view carries its own summary
+                        # (the generic per-analysis one would show only the
+                        # last check's numbers under every view).
+                        override = (self._report_analysis_inputs_html(analysis)
+                                    + self._report_summary_html(analysis))
+                        snap(check, summary_override=override)
+                finally:
+                    combo.set(prev)
+
         elif analysis == "Motor BOM (Cost & Weight)":
             if getattr(self, "bom_tree", None) is None:
                 self.update_plot()
                 snap()
             else:
-                # Three views cover the story: where the cost goes, where the
-                # weight goes, and the sorted cost drivers. View/metric combos
+                # Where the cost goes, where the weight goes, the sorted
+                # drivers of both, and the group split. View/metric combos
                 # are snapshotted and restored like the other report widgets.
                 prev = (self.bom_view_combo.get(), self.bom_metric_combo.get())
                 views = [
                     ("Sankey Diagram", "Cost (₹)", "Sankey - Cost"),
                     ("Sankey Diagram", "Weight (g)", "Sankey - Weight"),
                     ("Pareto (Max → Min)", "Cost (₹)", "Pareto - Cost"),
+                    ("Pareto (Max → Min)", "Weight (g)", "Pareto - Weight"),
+                    ("Group Split", "Cost (₹)", "Group Split - Cost"),
                 ]
                 if getattr(self, "bom_tree_b", None) is not None:
                     views.append(("Compare A vs B", "Cost (₹)",
@@ -617,9 +1118,9 @@ class EnhancementsMixin:
                     self.bom_metric_combo.set(prev[1])
 
         else:
-            # Acceleration, Parametric Study, Engine analysis: no sub-views.
-            # Range analysis and MTPA/MTPV already default to an "All" /
-            # multi-panel dashboard covering everything in one figure.
+            # Acceleration, Engine analysis: no sub-views. MTPA/MTPV already
+            # defaults to its "All" multi-panel dashboard covering every
+            # quantity in one figure.
             self.update_plot()
             snap()
 
@@ -702,7 +1203,8 @@ class EnhancementsMixin:
         original_compare_plot = self._report_widget_text("compare_std_plot_var") or None
 
         sections = []
-        toc = ["<li><a href='#inputs'>Vehicle &amp; Motor Inputs</a></li>"]
+        toc = ["<li><a href='#inputs'>Parameters (Vehicle &amp; Motor Inputs)</a></li>",
+               "<li><a href='#assumptions'>Model Assumptions</a></li>"]
         try:
             self.configure(cursor="watch")
             self.update_idletasks()
@@ -715,14 +1217,27 @@ class EnhancementsMixin:
                     views = self._render_report_views(name)
                     analysis_inputs_html = self._report_analysis_inputs_html(name)
                     summary_html = self._report_summary_html(name)
-                    for i, (subtitle, b64) in enumerate(views):
+                    observations_html = self._report_observations_html(name)
+                    first_has_interp = bool(views and len(views[0]) > 3 and views[0][3])
+                    for i, (subtitle, b64, override, interp) in enumerate(views):
                         anchor = f"section-{len(sections)}"
                         title = f"{name} — {subtitle}" if subtitle else name
-                        section_summary = summary_html
-                        if i == 0 and analysis_inputs_html:
-                            section_summary = analysis_inputs_html + section_summary
+                        if override is not None:
+                            # View-specific summary (already includes its own
+                            # inputs where relevant, e.g. Mechanical Design).
+                            section_summary = override
+                        else:
+                            section_summary = summary_html
+                            if i == 0 and analysis_inputs_html:
+                                section_summary = analysis_inputs_html + section_summary
+                        # The per-view interpretation supersedes the old
+                        # analysis-level observations box; keep the latter only
+                        # for analyses whose views carry no interpretation.
+                        if i == 0 and observations_html and not first_has_interp:
+                            section_summary += observations_html
                         sections.append(_REPORT_SECTION_TEMPLATE.format(
-                            anchor=anchor, name=title, b64=b64, summary=section_summary))
+                            anchor=anchor, name=title, b64=b64,
+                            interp=(interp or ""), summary=section_summary))
                         toc.append(f"<li><a href='#{anchor}'>{title}</a></li>")
                         n_views_total += 1
                 except Exception as exc:
@@ -753,8 +1268,10 @@ class EnhancementsMixin:
         try:
             stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
             inputs_html = self._report_core_inputs_html()
+            assumptions_html = self._report_assumptions_html()
             html = _MULTI_REPORT_TEMPLATE.format(
-                stamp=stamp, inputs=inputs_html, toc="\n".join(toc), sections="\n".join(sections),
+                stamp=stamp, inputs=inputs_html, assumptions=assumptions_html,
+                toc="\n".join(toc), sections="\n".join(sections),
                 primary=COLORS["primary"], dark=COLORS["header_bg"],
             )
             with open(path, "w", encoding="utf-8") as f:
@@ -1120,6 +1637,7 @@ COLORS_FONT = "Segoe UI"
 _REPORT_SECTION_TEMPLATE = """<div class="card" id="{anchor}">
  <h2>{name}</h2>
  <img src="data:image/png;base64,{b64}" alt="{name} figure">
+ {interp}
  <div class="summary">{summary}</div>
 </div>"""
 
@@ -1141,11 +1659,18 @@ _MULTI_REPORT_TEMPLATE = """<!DOCTYPE html>
  table{{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}}
  td,th{{padding:7px 10px;border-bottom:1px solid #eef1f7;text-align:left}} td:first-child{{color:#475569}}
  .summary{{font-size:14px;line-height:1.6;margin-top:12px}}
+ .obs{{margin-top:12px;padding:12px 16px;background:#f8fafc;border-left:3px solid {primary};border-radius:0 10px 10px 0}}
+ .obs ul{{margin:6px 0 0;padding-left:20px}} .obs li{{margin:3px 0}}
+ .interp{{margin-top:12px;padding:12px 16px;background:#fbfcfe;border-left:3px solid #64748b;border-radius:0 10px 10px 0;font-size:14px;line-height:1.6}}
+ .interp .ihead{{margin:0 0 6px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#64748b}}
+ .interp p{{margin:6px 0}} .interp ul{{margin:4px 0 6px;padding-left:20px}} .interp li{{margin:3px 0}}
+ .assume ul{{margin:6px 0 0;padding-left:20px}} .assume li{{margin:4px 0;line-height:1.5}}
  footer{{text-align:center;color:#94a3b8;font-size:12px;padding:18px}}
 </style></head><body>
 <header><h1>Vehicle &harr; Motor Integration Report</h1><p>Generated {stamp}</p></header>
 <main>
- <div class="card" id="inputs"><h2>Vehicle &amp; Motor Inputs</h2>{inputs}</div>
+ <div class="card" id="inputs"><h2>1 &middot; Parameters — Vehicle &amp; Motor Inputs</h2>{inputs}</div>
+ <div class="card assume" id="assumptions"><h2>2 &middot; Model Assumptions</h2>{assumptions}</div>
  <nav class="toc"><h2>Contents</h2><ul>{toc}</ul></nav>
  {sections}
 </main>

@@ -260,20 +260,90 @@ class TorqueSpeedApp(
         self.sections['dynamics'] = self.create_section(input_frame, "Vehicle Dynamics Inputs (Optional)", "#f1f5f9")
         self.create_labeled_entry(self.sections['dynamics'], "Crr (optional)", "", "crr")
         self.create_labeled_entry(self.sections['dynamics'], "CdA (m²) (optional)", "", "cd_a")
-        self.create_labeled_entry(self.sections['dynamics'], "Gradients (%) (comma separated)", "0,7,12.3,17.6", "gradients")
+        self.create_labeled_entry(self.sections['dynamics'], "Gradients (comma separated)", "0,7,12.3,17.6", "gradients")
+        # Gradient values can be entered as a slope percentage (rise/run x 100,
+        # the original behaviour) or as an incline angle in degrees. Everything
+        # downstream works in percent via get_gradients_pct(); plot labels are
+        # rendered back in the selected unit by fmt_gradient().
+        grad_unit_row = self.create_control_row(self.sections['dynamics'], "Gradient Unit")
+        self.gradient_unit_combo = ctk.CTkComboBox(
+            grad_unit_row,
+            values=["Percent (%)", "Degrees (°)"],
+            font=("Segoe UI", 12),
+            width=140,
+            command=lambda _c: self.update_plot(),
+        )
+        self.gradient_unit_combo.set("Percent (%)")
+        self.gradient_unit_combo.pack(side="right")
 
         self.sections['motor'] = self.create_section(input_frame, "Motor Performance Parameters", "#f1f5f9")
         self.create_labeled_entry(self.sections['motor'], "Peak Torque (Nm)", "180", "peak_torque")
         self.create_labeled_entry(self.sections['motor'], "Peak Power (kW)", "2.4", "peak_power")
         self.create_labeled_entry(self.sections['motor'], "Continuous Power (kW)", "1.8", "continuous_power")
         self.create_labeled_entry(self.sections['motor'], "Peak to Rated Torque Ratio", "2", "peak_to_rated_torque_ratio")
-        # Battery DC limit (optional): shaft power is capped at Vdc*Idc*eta
-        # everywhere a motor capability curve is drawn (torque/force/accel,
-        # parametric sweeps, Compare Std overlays, efficiency-map envelope).
-        # Leaving voltage or current blank = no cap (original behaviour).
+        # Battery DC limit (optional): shaft power is capped everywhere a
+        # motor capability curve is drawn (torque/force/accel, parametric
+        # sweeps, Compare Std overlays, efficiency-map envelope). With the
+        # Motor/Controller efficiency maps loaded the limit is evaluated
+        # AFTER them (Vdc*Idc*eta_m(T,w)*eta_c(T,w), per operating point);
+        # the Battery-to-Shaft Efficiency entry is the constant-chain
+        # fallback used only when no maps are loaded. Leaving voltage or
+        # current blank = no cap (original behaviour).
         self.create_labeled_entry(self.sections['motor'], "Battery Voltage (V) (optional)", "", "batt_voltage")
         self.create_labeled_entry(self.sections['motor'], "Battery DC Current Limit (A) (optional)", "", "batt_current_limit")
-        self.create_labeled_entry(self.sections['motor'], "Battery-to-Shaft Efficiency (0-1)", "0.9", "batt_to_shaft_eff")
+        self.create_labeled_entry(self.sections['motor'], "Battery-to-Shaft Eff (0-1, used when no maps)", "0.9", "batt_to_shaft_eff")
+        # A coarse or NaN-holed uploaded efficiency map can put a hard
+        # efficiency cliff right at its own coverage edge (a grid cell with
+        # one NaN corner falls back to a flat constant) -- exactly where the
+        # battery limit usually binds hardest, showing up as an abrupt jump
+        # in the capped torque-speed curve. Off by default (no-op unless
+        # both a map AND a battery limit are in play); see
+        # HelpersMixin._battery_eta_fn / calc_ext.smooth_efficiency_matrix.
+        battery_smooth_row = self.create_control_row(
+            self.sections['motor'], "Smooth Map for Battery Limit")
+        self.battery_eff_smoothing_switch = ctk.CTkSwitch(
+            battery_smooth_row, text="", onvalue=True, offvalue=False,
+            command=self.update_plot,
+        )
+        self.battery_eff_smoothing_switch.pack(side="right")
+
+        # --- Thermal load points (duty-point overlay) ---------------------
+        # Steady operating conditions (gradient, speed, time-at-condition)
+        # converted to motor torque-speed points and overlaid on the Torque
+        # plot and the efficiency maps, so the user can check at a glance
+        # whether the motor sustains the intended duty. Fail-soft: overlay
+        # off / blank / malformed points simply draw nothing.
+        self.sections['thermal'] = self.create_section(input_frame, "Thermal Load Points (Optional)", "#f1f5f9")
+        thermal_frame = self.sections['thermal']
+        thermal_row = self.create_control_row(thermal_frame, "Show Load Points")
+        self.thermal_overlay_switch = ctk.CTkSwitch(
+            thermal_row, text="", onvalue=True, offvalue=False,
+            command=self.update_plot,
+        )
+        self.thermal_overlay_switch.pack(side="right")
+        thermal_unit_row = self.create_control_row(thermal_frame, "Point Speed Unit")
+        self.thermal_speed_unit_combo = ctk.CTkComboBox(
+            thermal_unit_row, values=["km/h", "Motor RPM"],
+            font=("Segoe UI", 12), width=120,
+            command=lambda _c: self.update_plot(),
+        )
+        self.thermal_speed_unit_combo.set("km/h")
+        self.thermal_speed_unit_combo.pack(side="right")
+        # One point = gradient, speed, duration-at-condition (s). Multiple
+        # points: either a flat comma list grouped in 3s -- same style as the
+        # Gradients field, e.g. "0,60,300,7,30,600" for two points -- or
+        # ';'-separated triples, e.g. "0,60,300; 7,30,600". Gradient honors
+        # the Gradient Unit selector above.
+        self.create_labeled_entry(
+            thermal_frame,
+            "Points (grad,speed,time per point, e.g. 0,60,300,7,30,600)",
+            "", "thermal_points")
+        self.thermal_points.bind("<Return>", lambda _e: self.update_plot())
+        self.thermal_results_label = ctk.CTkLabel(
+            thermal_frame, text="", justify="left",
+            font=("Segoe UI", 11), text_color=COLORS['primary'], anchor="w",
+        )
+        self.thermal_results_label.pack(fill="x", padx=16, pady=(2, 8))
 
         self.sections['sim'] = self.create_section(input_frame, "Simulation Settings", "#f1f5f9")
         self.xlim_frame=self.create_labeled_entry(self.sections['sim'], "X-axis Limit (kmh,vehicle)"," ", "xlim",return_frame=True)
@@ -853,18 +923,18 @@ class TorqueSpeedApp(
         # 'graph_settings' is appended so each analysis carries its own panel;
         # populate_graph_settings() fills it with the controls for that view.
         self.analysis_sections = {
-            "Powertrain Sizing": ['plot_mode','vehicle', 'dynamics', 'motor', 'sim', 'env', 'graph_settings'],
+            "Powertrain Sizing": ['plot_mode','vehicle', 'dynamics', 'motor', 'thermal', 'sim', 'env', 'graph_settings'],
             "Acceleration":['vehicle', 'dynamics', 'motor', 'sim', 'env', 'graph_settings'],
             "Parametric Study": ['parametric_study', 'vehicle', 'dynamics', 'motor', 'env', 'graph_settings'],
             "Engine analysis": ['vehicle', 'dynamics', 'motor', 'env', 'engine_analysis', 'graph_settings'],
-            "Drive Cycle Efficiency": ['drivecycle_data','efficiency_data','motor_input_params','plot_efficiency_map', 'graph_settings'],
+            "Drive Cycle Efficiency": ['drivecycle_data','efficiency_data','motor_input_params','plot_efficiency_map', 'thermal', 'graph_settings'],
             "Drive Cycle": ['drivecycle_data','drive_cycle','plotting_data', 'vehicle', 'dynamics', 'motor', 'graph_settings'],
             "Compare Standard Motor Data": ['compare_std', 'vehicle', 'dynamics', 'motor', 'sim', 'env', 'graph_settings'],
             # Flow: Analysis Type (above) -> Input Data (drive cycle, then the
             # Motor/Controller efficiency maps) -> Range plot view (foldable list)
             # -> Battery Inputs (now also holds regen cap + energy integration,
             # right below the plot view) -> remaining physics inputs.
-            "Range analysis": ['drivecycle_data', 'efficiency_data', 'range_plot', 'range_battery', 'range_efficiency', 'vehicle', 'dynamics', 'motor', 'env'],
+            "Range analysis": ['drivecycle_data', 'efficiency_data', 'range_plot', 'range_battery', 'range_efficiency', 'vehicle', 'dynamics', 'motor', 'env', 'graph_settings'],
             # Pure d-q machine analysis: needs only its own motor-model inputs.
             "MTPA / MTPV (PMSM)": ['mtpa_mtpv', 'graph_settings'],
             # Pure mechanical hand-calc checks: own inputs only (see
