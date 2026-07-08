@@ -610,7 +610,6 @@ def _dce(app, subtitle):
         return ""   # placeholder capture (no maps loaded)
     ratio = _f(app, "peak_to_rated_torque_ratio", 2.0) or 2.0
     t_pk = _f(app, "peak_torque")
-    is_motor = subtitle.startswith("Motor")
     is_ctrl = subtitle.startswith("Controller")
     is_regen = "Regen" in subtitle
     is_diff = "Difference" in subtitle

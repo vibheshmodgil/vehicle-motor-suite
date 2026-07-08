@@ -20,68 +20,6 @@ from .applog import logger
 
 class DriveCycleMixin:
 
-    def drive_cycle_efficiency(self, params):
-        """
-        Generates an efficiency contour plot overlaid with drive cycle data.
-        """
-        # Load efficiency map data from Excel
-        df_efficiency = pd.read_excel("check.xlsx", index_col=0)
-        Speed, Torque, Efficiency = potting_efficieny(df_efficiency)
-
-        # Convert data to NumPy arrays
-        Speed = np.asarray(Speed, dtype=np.float64)
-        Torque = np.asarray(Torque, dtype=np.float64)
-        Efficiency = np.asarray(Efficiency, dtype=np.float64)
-
-        # Validate efficiency matrix dimensions
-        if Efficiency.shape != Speed.shape:
-            raise ValueError(f"Efficiency matrix shape mismatch: Expected {Speed.shape}, but got {Efficiency.shape}.")
-
-        # Load drive cycle data
-        df_drive_cycle = pd.read_excel("idc.xlsx")
-        elapsed_time = df_drive_cycle.iloc[:, 0].values  # Time data (first column)
-        vehicle_speed = df_drive_cycle.iloc[:, -1].values  # Speed data (last column)
-
-        # Compute motor speed and torque based on drive cycle data
-        motor_rpm, motor_torque = driveCycleData(
-            elapsed_time, vehicle_speed,
-            wheel_radius=float(self.wheel_radius.get()), gear_ratio=1,
-            vehicle_mass=params['m_i'], drag_coeff=params['CdA'], 
-            rolling_resistance=params['Crr'], air_density=1.225
-        )
-        
-        # Convert to NumPy arrays for efficient processing
-        motor_rpm = np.asarray(motor_rpm, dtype=np.float64)
-        motor_torque = np.asarray(motor_torque, dtype=np.float64)
-
-        # Filter for positive torque values only
-        positive_indices = motor_torque > 0
-        motor_rpm = motor_rpm[positive_indices]
-        motor_torque = motor_torque[positive_indices]
-
-        # Clear previous figure
-        self.ax.clear()
-
-        # Generate efficiency contour plot
-        contour = self.ax.contourf(Speed, Torque, Efficiency, cmap='viridis', levels=20)
-        contour_lines = self.ax.contour(Speed, Torque, Efficiency, colors='black', linewidths=0.8, levels=20)
-        self.ax.clabel(contour_lines, inline=True, fontsize=8, fmt="%.1f")
-        self.figure.colorbar(contour, ax=self.ax, label="Efficiency (%)")
-
-        # Overlay drive cycle trace
-        self.ax.scatter(motor_rpm, motor_torque, color='red', s=5, alpha=0.7, label="Drive Cycle Data")
-
-        # Set axis labels and plot title
-        self.ax.set_xlabel("Speed (RPM)")
-        self.ax.set_ylabel("Torque (Nm)")
-        self.ax.set_title("Efficiency Map with Drive Cycle Trace")
-        self.ax.legend(loc="upper right", fontsize=10, frameon=True)
-        self.ax.grid(True, linestyle='--', alpha=0.6)
-
-        # Render the updated plot
-        self.canvas.draw()
-
-
     def update_drive_cycle_properties(self):
         """Calculate and display drive cycle properties in the input section."""
         # Clear previous labels

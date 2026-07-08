@@ -330,61 +330,6 @@ class EnhancementsMixin:
         "Motor BOM (Cost & Weight)": ["bom_results_label"],
     }
 
-    def generate_report(self):
-        """Ask which analyses to include, then build one HTML report holding
-        an image + numeric summary per selected analysis -- not just whatever
-        is on screen right now."""
-        analyses = list(getattr(self, "analysis_sections", {}).keys()) or [self.plot_type.get()]
-        self._open_report_picker(analyses)
-
-    def _open_report_picker(self, analyses):
-        popup = tk.Toplevel(self)
-        popup.title("Generate Report")
-        popup.configure(bg=COLORS['background'])
-        popup.grab_set()
-
-        ctk.CTkLabel(
-            popup, text="Include these analyses in the report:",
-            font=(COLORS_FONT, 13, "bold"),
-        ).pack(pady=(14, 6), padx=16, anchor="w")
-        ctk.CTkLabel(
-            popup,
-            text="Each selected analysis is re-plotted (using its currently\n"
-                 "loaded data) and added as its own image + summary section.",
-            font=(COLORS_FONT, 11), text_color=COLORS['text_muted'],
-            justify="left", anchor="w",
-        ).pack(padx=16, anchor="w", pady=(0, 8))
-
-        check_frame = ctk.CTkFrame(popup, fg_color="transparent")
-        check_frame.pack(fill="both", expand=True, padx=16)
-        current = getattr(self, "plot_mode", None) or self.plot_type.get()
-        check_vars = {}
-        for name in analyses:
-            var = tk.BooleanVar(value=(name == current))
-            ctk.CTkCheckBox(check_frame, text=name, variable=var).pack(anchor="w", pady=3)
-            check_vars[name] = var
-
-        btn_row = ctk.CTkFrame(popup, fg_color="transparent")
-        btn_row.pack(fill="x", padx=16, pady=(8, 4))
-        ctk.CTkButton(btn_row, text="Select All", width=100,
-                     command=lambda: [v.set(True) for v in check_vars.values()]).pack(side="left")
-        ctk.CTkButton(btn_row, text="Clear", width=100,
-                     command=lambda: [v.set(False) for v in check_vars.values()]).pack(side="left", padx=(6, 0))
-
-        def on_generate():
-            selected = [name for name in analyses if check_vars[name].get()]
-            popup.destroy()
-            if not selected:
-                self.set_status("Report: no analyses selected.", "warn")
-                return
-            self._generate_multi_analysis_report(selected)
-
-        ctk.CTkButton(popup, text="Generate Report", command=on_generate,
-                     fg_color=COLORS["primary"]).pack(padx=16, pady=(6, 14), fill="x")
-        popup.update_idletasks()
-        h = min(560, 210 + 32 * len(analyses))
-        popup.geometry(f"380x{h}")
-
     def _report_summary_html(self, name):
         """Text/table summary for one analysis's report section, drawn from
         whatever result label(s)/metrics that analysis actually has."""

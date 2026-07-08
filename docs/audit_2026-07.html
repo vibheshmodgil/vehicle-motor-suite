@@ -1,0 +1,514 @@
+<title>VMI Suite — Engineering Audit, Rev. A</title>
+<style>
+  :root{
+    --paper:#eef0ee; --paper-raised:#f7f8f6; --ink:#1b2320; --muted:#5c6864;
+    --line:#c7cdc9; --line-strong:#a9b2ae;
+    --accent:#a8632a; --accent-ink:#5c3714;
+    --blueprint:#2b4c5e; --blueprint-soft:#dfe6e8;
+    --crit:#9c3b30; --crit-soft:#f3ded9;
+    --high:#b1791f; --high-soft:#f4e7ce;
+    --med:#3d6b8a; --med-soft:#dde7ec;
+    --low:#4a7856; --low-soft:#dfe9e1;
+    --radius:3px;
+    --font-display:"Bahnschrift","SF Compact Display","Segoe UI Semibold","Arial Narrow",sans-serif;
+    --font-body:Charter,"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;
+    --font-mono:"Cascadia Code","JetBrains Mono",ui-monospace,"SF Mono",Consolas,monospace;
+  }
+  :root[data-theme="dark"]{
+    --paper:#14181a; --paper-raised:#1b201f; --ink:#e7ece9; --muted:#93a19c;
+    --line:#333c3a; --line-strong:#48524f;
+    --accent:#d18a4a; --accent-ink:#f3d8ba;
+    --blueprint:#6fa3bd; --blueprint-soft:#1f2f36;
+    --crit:#d16657; --crit-soft:#3a2420;
+    --high:#d1a13f; --high-soft:#3a331f;
+    --med:#6fa3bd; --med-soft:#20303a;
+    --low:#7fb489; --low-soft:#1f2e24;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#14181a; --paper-raised:#1b201f; --ink:#e7ece9; --muted:#93a19c;
+      --line:#333c3a; --line-strong:#48524f;
+      --accent:#d18a4a; --accent-ink:#f3d8ba;
+      --blueprint:#6fa3bd; --blueprint-soft:#1f2f36;
+      --crit:#d16657; --crit-soft:#3a2420;
+      --high:#d1a13f; --high-soft:#3a331f;
+      --med:#6fa3bd; --med-soft:#20303a;
+      --low:#7fb489; --low-soft:#1f2e24;
+    }
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--font-body); font-size:16.5px; line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{ background:var(--accent); color:var(--paper-raised); }
+  a{ color:var(--blueprint); }
+  a:focus-visible, button:focus-visible, summary:focus-visible{
+    outline:2px solid var(--blueprint); outline-offset:2px;
+  }
+
+  main{ max-width:760px; margin:0 auto; padding:48px 24px 96px; }
+
+  /* ---------------------------------------------------------------- */
+  /*  Title block — drafting-table convention, not a generic hero      */
+  /* ---------------------------------------------------------------- */
+  .titleblock{
+    border:1px solid var(--line-strong); border-radius:var(--radius);
+    background:var(--paper-raised);
+    padding:0; margin-bottom:40px; overflow:hidden;
+  }
+  .titleblock-main{ padding:26px 28px 20px; border-bottom:1px solid var(--line); }
+  .eyebrow{
+    font-family:var(--font-display); font-size:12px; font-weight:600;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--blueprint);
+    margin:0 0 10px;
+  }
+  h1{
+    font-family:var(--font-display); font-weight:600; letter-spacing:-.01em;
+    font-size:clamp(28px,4.4vw,38px); line-height:1.12; margin:0 0 8px;
+    text-wrap:balance;
+  }
+  .titleblock-sub{ margin:0; color:var(--muted); font-size:16px; max-width:58ch; }
+  .titleblock-grid{
+    display:grid; grid-template-columns:repeat(4,1fr);
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+  }
+  .tb-field{ padding:12px 16px; border-right:1px solid var(--line); }
+  .tb-field:last-child{ border-right:none; }
+  .tb-field dt{
+    font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--muted); margin:0 0 4px; font-family:var(--font-display); font-weight:600;
+  }
+  .tb-field dd{ margin:0; font-size:14px; }
+  @media (max-width:640px){
+    .titleblock-grid{ grid-template-columns:repeat(2,1fr); }
+    .tb-field:nth-child(2n){ border-right:none; }
+    .tb-field{ border-bottom:1px solid var(--line); }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Prose sections                                                    */
+  /* ---------------------------------------------------------------- */
+  section{ margin-bottom:44px; }
+  h2{
+    font-family:var(--font-display); font-weight:600; font-size:15px;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--ink);
+    margin:0 0 4px; display:flex; align-items:baseline; gap:10px;
+  }
+  h2 .num{ font-family:var(--font-mono); color:var(--blueprint); font-weight:500; }
+  .section-rule{ height:1px; background:var(--line); margin:10px 0 22px; }
+  h3{
+    font-family:var(--font-display); font-weight:600; font-size:17px;
+    margin:28px 0 10px; letter-spacing:.01em;
+  }
+  p{ margin:0 0 14px; max-width:66ch; }
+  .lede{ font-size:18px; color:var(--ink); max-width:64ch; }
+  ul, ol{ margin:0 0 14px; padding-left:1.3em; max-width:64ch; }
+  li{ margin:4px 0; }
+  code{
+    font-family:var(--font-mono); font-size:.88em; background:var(--paper-raised);
+    border:1px solid var(--line); border-radius:2px; padding:1px 5px;
+  }
+  strong{ font-weight:700; }
+
+  .stat-row{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:1px;
+    background:var(--line); border:1px solid var(--line); border-radius:var(--radius);
+    overflow:hidden; margin:20px 0 8px;
+  }
+  .stat{ background:var(--paper-raised); padding:16px 18px; }
+  .stat .n{
+    font-family:var(--font-mono); font-variant-numeric:tabular-nums;
+    font-size:26px; font-weight:600; line-height:1; display:block; margin-bottom:6px;
+  }
+  .stat .l{ font-size:12.5px; color:var(--muted); letter-spacing:.01em; }
+  @media (max-width:640px){ .stat-row{ grid-template-columns:repeat(2,1fr); } }
+
+  /* ---------------------------------------------------------------- */
+  /*  Findings register — defect-log convention                        */
+  /* ---------------------------------------------------------------- */
+  .finding{
+    border:1px solid var(--line); border-left-width:4px; border-radius:var(--radius);
+    background:var(--paper-raised); padding:18px 20px 20px; margin-bottom:16px;
+    animation:rise .4s ease-out backwards;
+  }
+  @media (prefers-reduced-motion:reduce){ .finding{ animation:none; } }
+  @keyframes rise{ from{ opacity:0; transform:translateY(6px); } to{ opacity:1; transform:none; } }
+  .finding.crit{ border-left-color:var(--crit); }
+  .finding.high{ border-left-color:var(--high); }
+  .finding.med{ border-left-color:var(--med); }
+  .finding.low{ border-left-color:var(--low); }
+
+  .finding-head{
+    display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+    margin-bottom:8px;
+  }
+  .fid{ font-family:var(--font-mono); font-weight:600; color:var(--muted); font-size:13px; }
+  .chip{
+    font-family:var(--font-display); font-weight:600; font-size:10.5px;
+    letter-spacing:.08em; text-transform:uppercase; padding:2.5px 8px;
+    border-radius:2px; white-space:nowrap;
+  }
+  .chip.crit{ background:var(--crit-soft); color:var(--crit); }
+  .chip.high{ background:var(--high-soft); color:var(--high); }
+  .chip.med{ background:var(--med-soft); color:var(--med); }
+  .chip.low{ background:var(--low-soft); color:var(--low); }
+  .chip.fixed{ background:var(--low-soft); color:var(--low); }
+  .chip.open{ background:var(--paper); color:var(--muted); border:1px solid var(--line-strong); }
+
+  .finding h4{
+    font-family:var(--font-body); font-weight:700; font-size:17px;
+    margin:0 0 10px; line-height:1.35;
+  }
+  .finding .loc{ font-family:var(--font-mono); font-size:13px; color:var(--blueprint); }
+  .finding p{ font-size:15.5px; margin-bottom:10px; }
+  .finding .fix{
+    margin-top:12px; padding-top:12px; border-top:1px dashed var(--line);
+    font-size:14.5px;
+  }
+  .fix .label{
+    font-family:var(--font-display); font-weight:600; font-size:11px;
+    letter-spacing:.08em; text-transform:uppercase; color:var(--muted);
+    display:block; margin-bottom:4px;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Roadmap table                                                     */
+  /* ---------------------------------------------------------------- */
+  .table-wrap{ overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); }
+  table{ border-collapse:collapse; width:100%; min-width:560px; font-size:14.5px; }
+  th, td{ text-align:left; padding:10px 14px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{
+    font-family:var(--font-display); font-weight:600; font-size:11.5px;
+    letter-spacing:.06em; text-transform:uppercase; color:var(--muted);
+    background:var(--paper-raised);
+  }
+  tr:last-child td{ border-bottom:none; }
+  td.eff{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+  .priority-tag{
+    display:inline-block; font-family:var(--font-mono); font-size:12px;
+    padding:1px 6px; border-radius:2px; font-weight:600;
+  }
+  .priority-tag.p1{ background:var(--crit-soft); color:var(--crit); }
+  .priority-tag.p2{ background:var(--high-soft); color:var(--high); }
+  .priority-tag.p3{ background:var(--med-soft); color:var(--med); }
+
+  blockquote{
+    margin:20px 0; padding:14px 18px; border-left:3px solid var(--blueprint);
+    background:var(--blueprint-soft); font-size:15px; max-width:62ch;
+    border-radius:0 var(--radius) var(--radius) 0;
+  }
+  blockquote p{ margin:0; }
+
+  footer{
+    max-width:760px; margin:0 auto; padding:0 24px 60px;
+    color:var(--muted); font-size:13px; border-top:1px solid var(--line);
+    padding-top:20px; font-family:var(--font-mono);
+  }
+</style>
+
+<main>
+
+  <div class="titleblock">
+    <div class="titleblock-main">
+      <p class="eyebrow">Engineering Audit — Internal Review</p>
+      <h1>Vehicle ↔ Motor Integration Suite</h1>
+      <p class="titleblock-sub">Static code review, architecture risk assessment, and prioritized
+      remediation plan for the powertrain sizing/assessment desktop tool.</p>
+    </div>
+    <dl class="titleblock-grid">
+      <div class="tb-field"><dt>Document</dt><dd>VMI-AUDIT-2026-07-A</dd></div>
+      <div class="tb-field"><dt>Date</dt><dd>2026-07-07</dd></div>
+      <div class="tb-field"><dt>Revision</dt><dd>A — first pass</dd></div>
+      <div class="tb-field"><dt>Scope</dt><dd>Full repository, 17,027 LOC</dd></div>
+    </dl>
+  </div>
+
+  <section>
+    <h2><span class="num">§0</span>Method &amp; scope</h2>
+    <div class="section-rule"></div>
+    <p class="lede">This review covers the whole repository — every module under <code>vmi/</code>,
+    the test suite, dependency posture, and repo hygiene — not just the physics/report work from
+    the last few sessions. Findings are ranked by what actually happens if left alone, not by
+    how they were found.</p>
+    <p>Method: an AST-level duplicate-definition scan (catches methods silently shadowed within a
+    class, and name collisions across the mixins that make up <code>TorqueSpeedApp</code>), a
+    <code>pyflakes</code> pass across every module, a manual re-read of the battery-limit solver,
+    range-energy model, and the new report-interpretation engine added this session, and a
+    file-system/git-hygiene check (CWD-dependent paths, <code>.gitignore</code> coverage, CI
+    presence). The existing 181-test golden-value suite was run before and after every change.</p>
+    <div class="stat-row">
+      <div class="stat"><span class="n">6</span><span class="l">findings logged</span></div>
+      <div class="stat"><span class="n">2</span><span class="l">fixed in this pass</span></div>
+      <div class="stat"><span class="n">181/181</span><span class="l">tests passing throughout</span></div>
+      <div class="stat"><span class="n">57%</span><span class="l">of LOC with zero test coverage</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">§1</span>Findings register</h2>
+    <div class="section-rule"></div>
+
+    <article class="finding high">
+      <div class="finding-head">
+        <span class="fid">F-01</span>
+        <span class="chip high">High</span>
+        <span class="chip open">Open</span>
+      </div>
+      <h4>Session, log, and motor-library files resolve against the current working directory, not against the app's install location</h4>
+      <p class="loc">vmi/app.py:61 · vmi/data_io.py:78,88 · vmi/applog.py:13 · vmi/enhancements.py:1506</p>
+      <p><code>std_motor_data_sample.json</code>, <code>vmi_app.log</code>, and
+      <code>vmi_last_session.json</code> are all opened with a bare relative filename. Python
+      resolves that against the process's current working directory at launch — <em>not</em>
+      "next to <code>main.py</code>," which is what the docstrings in <code>main.py</code> and
+      <code>applog.py</code> both claim. Any launch path that isn't "open a terminal, <code>cd</code>
+      into this exact folder, run <code>python main.py</code>" — a desktop shortcut, a different
+      terminal tab, <code>python -m vmi</code> invoked from elsewhere — silently creates fresh,
+      empty versions of all three files in whatever directory happened to be current, instead of
+      finding the real ones. The saved motor library "disappears," the session doesn't restore,
+      and errors stop being logged where anyone would look.</p>
+      <div class="fix">
+        <span class="label">Recommendation</span>
+        Anchor all three paths to a fixed location — <code>Path(__file__).resolve().parent.parent</code>
+        from inside the <code>vmi</code> package gives "next to <code>main.py</code>" regardless of
+        CWD. This is a config change, not a rewrite; low risk, high support-cost payoff.
+      </div>
+    </article>
+
+    <article class="finding crit">
+      <div class="finding-head">
+        <span class="fid">F-02</span>
+        <span class="chip crit">Critical</span>
+        <span class="chip fixed">Fixed this pass</span>
+      </div>
+      <h4>Dead method with two undefined names and two hardcoded, nonexistent input files</h4>
+      <p class="loc">vmi/drive_cycle.py:23 (removed)</p>
+      <p><code>DriveCycleMixin.drive_cycle_efficiency()</code> read <code>"check.xlsx"</code> and
+      <code>"idc.xlsx"</code> directly off disk — bypassing the app's entire upload/column-picker
+      pipeline — and called <code>potting_efficieny(...)</code> and <code>driveCycleData(...)</code>,
+      neither of which exist anywhere in the codebase. Confirmed via full-repo grep: the method is
+      never called from any button, menu, or dispatch branch. It is a prototype fragment that
+      survived the "copy every method body verbatim" migration described in <code>CLAUDE.md</code>.
+      Harmless as long as it stays uninvoked — but indistinguishable from live code to a future
+      reader, and one accidental wiring away from an immediate <code>NameError</code> crash.</p>
+      <div class="fix">
+        <span class="label">Resolution</span>
+        Removed. Confirmed zero callers before deletion; full test suite (181/181) and a package
+        import check both pass afterward.
+      </div>
+    </article>
+
+    <article class="finding high">
+      <div class="finding-head">
+        <span class="fid">F-03</span>
+        <span class="chip high">High</span>
+        <span class="chip fixed">Fixed this pass</span>
+      </div>
+      <h4>Report-picker logic was defined twice in the same class — the first copy silently dead</h4>
+      <p class="loc">vmi/enhancements.py:333–386 (removed), :1129 (kept)</p>
+      <p><code>EnhancementsMixin.generate_report()</code> and <code>._open_report_picker()</code>
+      each had two method bodies in the class definition — a shorter, older pair and a newer pair
+      with the "full view hierarchy" picker text. Python keeps only the <em>last</em> definition of
+      a given name in a class body, so the app has been correctly running the second copy all
+      along — this was never a runtime bug. It was, however, ~55 lines of plausible-looking dead
+      code sitting in the same file as the real thing, with no marker distinguishing them. The
+      concrete risk: a future edit lands in the shadowed copy, the developer sees no effect, and
+      concludes the change "doesn't work" or — worse — the two copies are later merged in a way
+      that resurrects the older, less complete behavior.</p>
+      <div class="fix">
+        <span class="label">Resolution</span>
+        Removed the shadowed first copy. Verified the second (kept) copy's picker text and
+        behavior are what the app actually renders; 181/181 tests plus a full report-generation
+        smoke test pass afterward.
+      </div>
+    </article>
+
+    <article class="finding med">
+      <div class="finding-head">
+        <span class="fid">F-04</span>
+        <span class="chip med">Medium</span>
+        <span class="chip open">Open</span>
+      </div>
+      <h4>57% of the codebase — including the entire report-interpretation engine — has no automated test coverage</h4>
+      <p class="loc">vmi/dispatch.py · torque_force.py · drive_cycle.py · engine.py · compare_std.py ·
+      enhancements.py · graph_settings.py · report_insights.py — 8,212 of 14,510 lines in <code>vmi/</code></p>
+      <p>The 181-test suite is genuinely strong where it exists — golden-value regression tests
+      lock <code>physics.py</code>, <code>calc_ext.py</code>, <code>units.py</code>,
+      <code>mtpa_mtpv.py</code>'s solver, <code>mechanical_design.py</code>'s formulas, and
+      <code>bom.py</code>'s tree math. But it structurally cannot see widget wiring, dispatch
+      routing, Excel/JSON I/O, or plot orchestration — and it did not, and could not, catch F-02 or
+      F-03. Both surfaced in under five seconds from a single <code>pyflakes</code> pass with zero
+      project-specific setup. The 956-line <code>report_insights.py</code> engine added this
+      session (per-view engineering interpretation for the HTML report) is presently exercised only
+      by ad hoc scripts run by hand during development, not by anything committed to <code>tests/</code>.</p>
+      <div class="fix">
+        <span class="label">Recommendation</span>
+        Two independent, low-cost moves: (1) add <code>pyflakes</code> (or <code>ruff</code>) as a
+        standing pre-commit/CI gate — it needs no project-specific config and already found two
+        real bugs; (2) commit a lightweight smoke suite that boots <code>TorqueSpeedApp</code>
+        off-screen (<code>withdraw()</code>), clicks through every analysis type, and generates one
+        full report — this exact pattern was used by hand throughout this session and is roughly
+        150 lines to make permanent. It won't catch numeric regressions, but it will catch every
+        crash-on-launch and dead-reference class of bug going forward.
+      </div>
+    </article>
+
+    <article class="finding low">
+      <div class="finding-head">
+        <span class="fid">F-05</span>
+        <span class="chip low">Low</span>
+        <span class="chip open">Open</span>
+      </div>
+      <h4>An entire input section is built but never shown — pre-dates the Torque/Force merge</h4>
+      <p class="loc">vmi/app.py:370–374 (<code>sections['simforce']</code>) · vmi/dispatch.py:189–190</p>
+      <p>The "Simulation Settings-force" section and its two entries (<code>xlim_force</code>,
+      <code>ylim_force</code>) are constructed in <code>__init__</code> but never appear in any
+      <code>analysis_sections</code> list, so the user can never see or edit them — <code>CLAUDE.md</code>
+      itself documents that Torque and Force were merged into one "Powertrain Sizing" analysis using
+      a different, shared set of limit fields. <code>dispatch.py</code> still calls
+      <code>get_x_limits_force()</code>/<code>get_y_limits_force()</code> against the orphaned
+      fields every single plot and never uses either result.</p>
+      <div class="fix">
+        <span class="label">Recommendation</span>
+        Safe to delete: the widgets, the two dead locals in <code>dispatch.py</code>, and (if
+        nothing else references them) the two limit-getter methods in <code>limits.py</code>. Left
+        open in this pass — touches the widget tree and is zero-urgency, but should not be
+        mistaken for a hidden feature by a future maintainer.
+      </div>
+    </article>
+
+    <article class="finding low">
+      <div class="finding-head">
+        <span class="fid">F-06</span>
+        <span class="chip low">Low</span>
+        <span class="chip open">Open</span>
+      </div>
+      <h4>Assorted unused locals — lint noise, no behavior change</h4>
+      <p class="loc">compare_std.py · dispatch.py · efficiency.py · torque_force.py · data_io.py (~12 sites)</p>
+      <p>Mostly the pattern <code>from .physics import df</code> at module scope, shadowed by a
+      local <code>df = ...</code> inside nearly every method (harmless — the import is never used
+      by name after that point) — plus a couple of genuinely-computed-then-discarded values in
+      <code>compare_std.py</code> (<code>speed_km_hr_wheel</code>, <code>force_std</code>) that are
+      correctly recomputed a few lines later under the actual branch that needs them. No fix
+      applied to individual sites here; the <code>pyflakes</code> gate recommended in F-04 keeps
+      this class of thing from silently accumulating without hunting each one by hand.</p>
+    </article>
+  </section>
+
+  <section>
+    <h2><span class="num">§2</span>Architecture — what the mixin model costs</h2>
+    <div class="section-rule"></div>
+    <p><code>TorqueSpeedApp</code> is assembled from thirteen mixins sharing one <code>self</code>
+    with no encapsulation between them — documented deliberately in <code>CLAUDE.md</code> as a
+    tradeoff, and it is a reasonable one for a single-developer engineering tool: it keeps thirteen
+    files simple at the cost of one systemic risk. That risk is real and specific, not
+    hypothetical: a renamed <code>self.*</code> attribute is a cross-file change with no import
+    graph to catch it, and two mixins defining the same method name means the earlier one in the
+    MRO silently wins with no error.</p>
+    <p>The AST scan run for this audit checked the second failure mode directly — it walks every
+    class in every module and flags any method name defined in more than one mixin. Result today:
+    <strong>zero collisions</strong>. That is a genuine, current strength, not a gap — but it is
+    presently maintained by discipline (<code>CLAUDE.md</code>'s "grep before naming a new method")
+    rather than by anything that runs automatically.</p>
+    <blockquote><p>The twenty-line AST scan used to verify this is cheap enough to keep. Wiring it
+    into the F-04 lint gate turns "currently zero collisions" into "structurally cannot regress"
+    for the cost of one more check in the same CI step.</p></blockquote>
+    <p>Separately: 194 occurrences of <code>except Exception: pass</code> across <code>vmi/</code>
+    are a deliberate fail-soft choice, appropriate for a GUI where one bad field shouldn't kill the
+    session — but several of them now wrap load-bearing calculation paths added this session: the
+    battery-efficiency map lookup (<code>_battery_eta_fn</code>) and every builder function inside
+    <code>report_insights.py</code>. A genuine defect in either currently degrades silently — to a
+    constant-efficiency fallback, or to a report section that simply carries no interpretation —
+    with no trace anywhere. This is precisely the failure mode that let F-02 go unnoticed.
+    Recommend narrowing scope only where it's cheap: log to <code>vmi_app.log</code> on the
+    exception before swallowing it, in the calculation paths specifically (not the GUI event
+    handlers, where the existing pattern is correct as-is).</p>
+  </section>
+
+  <section>
+    <h2><span class="num">§3</span>What's already solid</h2>
+    <div class="section-rule"></div>
+    <p>An audit that only lists problems is an incomplete one. Several things checked out clean and
+    are worth stating plainly rather than leaving implicit:</p>
+    <ul>
+      <li><strong>No dangerous APIs anywhere in <code>vmi/</code></strong> — a full-repo grep for
+      <code>eval</code>, <code>exec</code>, <code>os.system</code>, <code>subprocess</code>, and
+      <code>pickle</code> returned nothing. For a tool that loads user-supplied Excel/JSON files,
+      that absence is a real property, not a coincidence.</li>
+      <li><strong>The local-LLM assistant sidebar is actually local</strong> — the only network
+      endpoint referenced anywhere in <code>llm_client.py</code>/<code>rag_store.py</code>/<code>assistant.py</code>
+      is <code>http://localhost:11434</code> (Ollama). The "no cloud calls" claim in the code
+      comments holds up.</li>
+      <li><strong><code>.gitignore</code> hygiene is correct</strong> — generated state
+      (<code>vmi_last_session.json</code>, <code>vmi_app.log*</code>, the user's own
+      <code>std_motor_data_sample.json</code>, the assistant's vector index, sample data) is
+      excluded and confirmed untracked; licensed reference material dropped into
+      <code>knowledge_base/</code> is excluded by default with an explicit opt-in comment.</li>
+      <li><strong>Dependencies are exactly pinned</strong>, not range-pinned, with a comment
+      explaining why (<code>customtkinter</code>'s breaking changes between versions) — the right
+      call for a desktop tool where "it worked when I tested it" needs to keep meaning that.</li>
+      <li><strong>The physics core is genuinely golden-locked</strong> — <code>physics.py</code>,
+      the battery/inertia helpers, the MTPA/MTPV solver, and the mechanical-design formulas all
+      have regression tests tied to specific numeric literals, exactly matching the project's own
+      stated contract that calibrated numbers must not silently drift.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="num">§4</span>Prioritized roadmap</h2>
+    <div class="section-rule"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Priority</th><th>Action</th><th>Why now</th><th>Effort</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="priority-tag p1">P1</span></td>
+            <td>Fix CWD-relative paths (F-01)</td>
+            <td>Silent data loss for any user who doesn't launch from the exact project folder</td>
+            <td class="eff">~30 min</td>
+          </tr>
+          <tr>
+            <td><span class="priority-tag p1">P1</span></td>
+            <td>Add a <code>pyflakes</code>/<code>ruff</code> CI gate (F-04)</td>
+            <td>Found 2 of the 6 findings here in under 5 seconds; currently nothing runs automatically on push</td>
+            <td class="eff">~1 hr</td>
+          </tr>
+          <tr>
+            <td><span class="priority-tag p2">P2</span></td>
+            <td>Commit the app-boot smoke suite to <code>tests/</code> (F-04)</td>
+            <td>Closes the exact gap that let F-02/F-03 ship undetected; scripts already exist from this session</td>
+            <td class="eff">~2–3 hrs</td>
+          </tr>
+          <tr>
+            <td><span class="priority-tag p2">P2</span></td>
+            <td>Log-before-swallow in calculation-path exception handlers (§2)</td>
+            <td>Turns future silent degradations into a paper trail in <code>vmi_app.log</code></td>
+            <td class="eff">~1 hr</td>
+          </tr>
+          <tr>
+            <td><span class="priority-tag p3">P3</span></td>
+            <td>Remove the orphaned Force simulation section (F-05)</td>
+            <td>Zero user-facing effect; pure debt reduction, do opportunistically</td>
+            <td class="eff">~30 min</td>
+          </tr>
+          <tr>
+            <td><span class="priority-tag p3">P3</span></td>
+            <td>Clear remaining lint noise (F-06) once the gate exists</td>
+            <td>The gate in P1 makes this self-enforcing going forward; no need to hand-hunt today</td>
+            <td class="eff">ongoing</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  VMI-AUDIT-2026-07-A · Rev. A · Findings F-01–F-06 · 2/6 resolved in this pass, 181/181 regression tests green throughout
+</footer>
