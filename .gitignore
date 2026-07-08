@@ -27,6 +27,9 @@ vmi_report.html
 sample_data/
 # Assistant's local vector index (regenerated with "Rebuild Knowledge Base").
 knowledge_base/.index/
+# Tolerance & Stack-up Studio's model file (your personal tolerance data;
+# seeded fresh on first run if absent -- see tolerance_studio.py).
+tolerance_studio.json
 
 # --- Reference documents you drop in for the Assistant to read ---
 # These may be licensed/proprietary (datasheets, standards, product docs) and
