@@ -69,6 +69,12 @@ class CompareStdMixin:
     def update_compare_std_plot(self):
         plot_type = self.compare_std_plot_var.get()  # "torque", "force", "acceleration", "efficiency"
         mode = self.torque_compare_mode.get()  # "Wheel" or "Motor"
+        _speed_unit_widget = getattr(self, "compare_speed_unit_combo", None)
+        x_axis_unit = _speed_unit_widget.get() if _speed_unit_widget is not None else "Km/hr"
+        if plot_type not in ("torque", "force"):
+            # Acceleration's x-axis is Time; Efficiency has its own axes --
+            # RPM has no meaning there, so the toggle only touches Torque/Force.
+            x_axis_unit = "Km/hr"
         self.safe_remove_colorbar('heatmap_colorbar')
         self.safe_remove_colorbar('efficiency_colorbar')
         self.safe_remove_colorbar('parametric_colorbar')
@@ -127,15 +133,30 @@ class CompareStdMixin:
         x_limits = self.get_x_limits(speed_unit, wheel_radius, gear_ratio)
         y_limits = self.get_y_limits(plot_part, gear_ratio)
         max_speed = max(x_limits)
-        speeds = np.linspace(0.1, max_speed, 6000)
+        speeds = np.linspace(0.1, max_speed, 6000)  # always km/h -- the shared physical sweep
         speeds_in_rpm = np.linspace(1e-3, max_speed * 60 / (2 * np.pi * wheel_radius * 3.6), 1000)  # RPM for interpolation
         y_data_list = []
+
+        # When the user picked RPM, hand plot_torque_graph/plot_force_graph an
+        # RPM-scaled x_limits (converted via the CURRENT vehicle's wheel_radius
+        # / gear_ratio only) and speed_unit="RPM" -- they already derive their
+        # own wheel/motor RPM axis from `speeds` + those same two params
+        # (see torque_force.py), so no saved motor's own wheel radius is
+        # involved in the CURRENT motor's curve at all, in either mode.
+        if x_axis_unit == "RPM":
+            wheel_rpm_max = max_speed / 3.6 / wheel_radius * 60 / (2 * np.pi)
+            plot_speed_unit = "RPM"
+            plot_x_limits = [0.0, (wheel_rpm_max * gear_ratio if mode == "Motor" else wheel_rpm_max) * 1.05]
+        else:
+            plot_speed_unit = "km/hr"
+            plot_x_limits = x_limits
+
         # Call the correct plot function
         if plot_type == "torque":
 
             self.plot_torque_graph(
                 speeds, params, gradients, wheel_radius, peak_torque, peak_power, continuous_power,
-                x_limits, y_limits, gear_ratio, plot_part=plot_part, speed_unit="km/hr",
+                plot_x_limits, y_limits, gear_ratio, plot_part=plot_part, speed_unit=plot_speed_unit,
                 overlay_std=False, show_main_label=False, show_continuous=False,
                 peak_to_rated_torque_ratio=peak_to_rated_torque_ratio
             )
@@ -143,9 +164,10 @@ class CompareStdMixin:
         elif plot_type == "force":
             self.plot_force_graph(
                 speeds, params, gradients, wheel_radius, peak_torque, peak_power, continuous_power,
-                x_limits, y_limits, gear_ratio, peak_to_rated_torque_ratio=peak_to_rated_torque_ratio
+                plot_x_limits, y_limits, gear_ratio, plot_part="At Wheel", speed_unit=plot_speed_unit,
+                peak_to_rated_torque_ratio=peak_to_rated_torque_ratio
             )
-            y_data_list.append(y_limits[1]) 
+            y_data_list.append(y_limits[1])
             
         elif plot_type == "acceleration":
             self.plot_vehicle_max_speed_vs_time(
@@ -162,15 +184,31 @@ class CompareStdMixin:
             std_wheel_radius = float(entry["wheel_radius"])
             std_data = self.std_motor_data[name]
             speeds_rpm_std = np.array(std_data["speed_rpm"])
-            # speeds_rpm = np.linspace(1e-3, max(speeds_rpm), 1000)  # Ensure non-zero RPM for calculations
-            speed_km_hr_wheel =(speeds_rpm_std * 2 * np.pi * wheel_radius / 60 * 3.6)/gear_ratio
             torque_std = np.array(std_data["torque"])
-            force_std = (torque_std * std_gear_ratio * gear_eff) / std_wheel_radius  # Convert to force at wheel
-            # Interpolation grid
-            speeds_rpm_wheel = speeds * 60 / (2 * np.pi * std_wheel_radius) / 3.6
+            # Interpolation grid: which RPM of THIS motor's own saved curve
+            # corresponds to each point of the shared `speeds` sweep.
+            # - Km/hr mode: converted via this motor's own wheel radius (its
+            #   "what if this motor were installed on a wheel this size"
+            #   radius) -- unchanged, existing behaviour.
+            # - RPM mode: converted via the CURRENT VEHICLE's wheel radius
+            #   only, same for every motor being compared, so a saved motor's
+            #   own wheel_radius affects *which point of its curve* is looked
+            #   up (still correct -- more torque data available), but never
+            #   *where that point lands on the shared axis*. gear_ratio still
+            #   correctly moves the Motor-RPM axis per motor -- that's real.
+            if x_axis_unit == "RPM":
+                speeds_rpm_wheel = speeds * 60 / (2 * np.pi * wheel_radius) / 3.6
+            else:
+                speeds_rpm_wheel = speeds * 60 / (2 * np.pi * std_wheel_radius) / 3.6
             speeds_rpm_motor = speeds_rpm_wheel * std_gear_ratio
+
+            if x_axis_unit == "RPM":
+                x_for_plot = speeds_rpm_motor if (plot_type == "torque" and mode == "Motor") else speeds_rpm_wheel
+            else:
+                x_for_plot = speeds
+
             if plot_type == "torque":
-                
+
                 # Plot torque vs speed (at wheel or motor)
                 interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
                 interp_torque = self.cap_torque_to_battery(interp_torque, speeds_rpm_motor)
@@ -180,10 +218,13 @@ class CompareStdMixin:
                 else:
                     y = interp_torque
                     label = f"{name} (Motor)"
-                y_data_list.append(y)   
-                
-                (line,) = self.ax.plot(speeds, y, label=label, linewidth=self.gs_float("line_width", 2.0))
-                self.ax.set_xlabel("wheel Speed (km/hr)")
+                y_data_list.append(y)
+
+                (line,) = self.ax.plot(x_for_plot, y, label=label, linewidth=self.gs_float("line_width", 2.0))
+                if x_axis_unit == "RPM":
+                    self.ax.set_xlabel("Motor Speed (RPM)" if mode == "Motor" else "Wheel Speed (RPM)")
+                else:
+                    self.ax.set_xlabel("wheel Speed (km/hr)")
                 self.ax.set_ylabel("Torque (Nm)")
                 self.ax.set_title("Compare Standard Motor Data: Torque")
 
@@ -194,8 +235,14 @@ class CompareStdMixin:
                 # just the current motor's. Recomputed here (matches the
                 # resistive-torque formula plot_torque_graph already used to
                 # draw the shared "Gradient X%" line above) since that array
-                # isn't returned by the call that drew it.
-                x_label = "Wheel Speed (km/hr)" if mode == "Wheel" else "Motor Speed (km/hr)"
+                # isn't returned by the call that drew it. The resistive-force
+                # physics always needs REAL road speed, so it's computed from
+                # `speeds` (km/h) regardless of what unit is plotted on x --
+                # `speeds` and `x_for_plot` stay index-aligned either way.
+                if x_axis_unit == "RPM":
+                    x_label = "Motor Speed (RPM)" if mode == "Motor" else "Wheel Speed (RPM)"
+                else:
+                    x_label = "Wheel Speed (km/hr)" if mode == "Wheel" else "Motor Speed (km/hr)"
                 motor_back_drive_scale = max(gear_ratio * gear_eff, 1e-9)
                 for gradient in gradients:
                     wheel_resistive_torque = (
@@ -206,18 +253,19 @@ class CompareStdMixin:
                     y_resist = (wheel_resistive_torque if mode == "Wheel"
                                else wheel_resistive_torque / motor_back_drive_scale)
                     self._annotate_intersections(
-                        speeds, y, y_resist, x_label, "Nm",
+                        x_for_plot, y, y_resist, x_label, "Nm",
                         marker_color=line.get_color(), marker_style='D',
                         text_color=line.get_color(), fontsize=8)
             elif plot_type == "force":
-                # F = (torque * gear_ratio) / wheel_radius
+                # F = (torque * gear_ratio) / wheel_radius -- Force is always
+                # a wheel quantity, so x_for_plot above used speeds_rpm_wheel.
                 interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
                 interp_torque = self.cap_torque_to_battery(interp_torque, speeds_rpm_motor)
                 force = (interp_torque * std_gear_ratio * gear_eff) / wheel_radius
                 y=force
                 y_data_list.append(y)
-                self.ax.plot(speeds, y, label=f"{name} (Wheel Force)", linewidth=self.gs_float("line_width", 2.0))
-                self.ax.set_xlabel("Wheel Speed (km/hr)")
+                self.ax.plot(x_for_plot, y, label=f"{name} (Wheel Force)", linewidth=self.gs_float("line_width", 2.0))
+                self.ax.set_xlabel("Wheel Speed (RPM)" if x_axis_unit == "RPM" else "Wheel Speed (km/hr)")
                 self.ax.set_ylabel("Force (N)")
                 self.ax.set_title("Compare Standard Motor Data: Force")
 

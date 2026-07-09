@@ -857,6 +857,24 @@ class TorqueSpeedApp(
         # --- Compare Std Motor Data Section Controls ---
         self.compare_std_plot_var = tk.StringVar(value="torque")  # "torque", "force", "acceleration"
 
+        # Speed Unit for Torque/Force's x-axis. Km/hr (default) unavoidably
+        # ties a saved motor's own wheel_radius into where its points land on
+        # the shared axis (real physics: same motor RPM = different km/h for
+        # a different wheel). RPM removes that -- the axis becomes wheel/motor
+        # RPM built only from the CURRENT vehicle's wheel_radius + gear_ratio,
+        # so editing a saved motor's own wheel radius only changes which point
+        # of ITS curve is sampled, never where it's drawn. See compare_std.py.
+        speed_unit_row = ctk.CTkFrame(compare_frame, fg_color="transparent")
+        speed_unit_row.pack(fill="x", pady=(8, 2), padx=8)
+        ctk.CTkLabel(speed_unit_row, text="Speed Unit:", font=("Segoe UI", 12),
+                     text_color=COLORS['primary']).pack(side="left", padx=(0, 8))
+        self.compare_speed_unit_combo = ctk.CTkComboBox(
+            speed_unit_row, values=["Km/hr", "RPM"], width=100,
+            command=self.update_plot,
+        )
+        self.compare_speed_unit_combo.set("Km/hr")
+        self.compare_speed_unit_combo.pack(side="left")
+
         # Torque row: radio + dropdown
         torque_row = ctk.CTkFrame(compare_frame, fg_color="transparent")
         torque_row.pack(fill="x", pady=(8, 2), padx=8)
