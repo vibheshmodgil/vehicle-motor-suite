@@ -10,6 +10,15 @@ Pure stdlib + tkinter/ttk. matplotlib (chain chart) and openpyxl (.xlsx
 bootstrap import) are optional -- the page degrades gracefully without them.
 Touches nothing outside this module; the whole model persists to one JSON
 file (loaded on init, saved after every edit and again on teardown).
+
+UI notes (2026-07 redesign):
+  * All styling is local: tk widgets carry their own colors, and every
+    ttk style name is prefixed "Tol." so nothing leaks into the host app
+    (no ttk.Style().theme_use() call anywhere).
+  * Navigation is a custom segmented bar + tkraise()'d views (not a nested
+    ttk.Notebook) so the active view is visually obvious and stylable.
+  * Fits and Radial use master-detail layouts (table + editor panel);
+    Axial pairs the chain editor with a live result card + waterfall chart.
 """
 
 from __future__ import annotations
@@ -40,13 +49,49 @@ except Exception:  # pragma: no cover - optional dependency
     HAVE_OPENPYXL = False
 
 
-MONO_FONT = ("Consolas", 10)
-BADGE_COLORS = {
-    "Clearance": "#1b8a3a",
-    "Transition": "#1c5fa8",
-    "Interference": "#c96a15",
-    "Invalid": "#8a8f98",
+# --------------------------------------------------------------------------- #
+#  Visual system (self-contained -- matches the VMI suite's indigo/slate)     #
+# --------------------------------------------------------------------------- #
+C = {
+    "bg":            "#eef1f7",   # page background
+    "surface":       "#ffffff",   # cards / tables
+    "sunken":        "#f4f6fa",   # toolbars, group rows, zebra stripe
+    "border":        "#dbe2ec",
+    "border_strong": "#b9c4d4",
+    "ink":           "#0f172a",
+    "muted":         "#5a6a7e",
+    "faint":         "#93a1b3",
+    "accent":        "#4f46e5",   # indigo (VMI primary)
+    "accent_dark":   "#4338ca",
+    "accent_soft":   "#eef2ff",
+    "good":          "#15803d",
+    "good_soft":     "#e5f4ea",
+    "info":          "#1d4ed8",
+    "info_soft":     "#e8effd",
+    "warn":          "#c2540a",
+    "warn_soft":     "#fdeee1",
+    "bad":           "#b91c1c",
+    "bad_soft":      "#fdeaea",
 }
+
+F_UI      = ("Segoe UI", 10)
+F_UI_B    = ("Segoe UI Semibold", 10)
+F_SMALL   = ("Segoe UI", 9)
+F_H1      = ("Segoe UI Semibold", 15)
+F_H2      = ("Segoe UI Semibold", 11)
+F_MONO    = ("Consolas", 10)
+F_MONO_B  = ("Consolas", 11, "bold")
+F_MONO_XL = ("Consolas", 17, "bold")
+MONO_FONT = F_MONO  # back-compat alias
+
+# fit classification -> (strong color, soft background)
+CLS_COLORS = {
+    "Clearance":    (C["good"], C["good_soft"]),
+    "Transition":   (C["info"], C["info_soft"]),
+    "Interference": (C["warn"], C["warn_soft"]),
+    "Invalid":      (C["faint"], C["sunken"]),
+}
+BADGE_COLORS = {k: v[0] for k, v in CLS_COLORS.items()}  # back-compat
 
 
 # --------------------------------------------------------------------------- #
@@ -90,7 +135,7 @@ def _mk(cls, d):
 
 
 # --------------------------------------------------------------------------- #
-#  Data model                                                                 #
+#  Data model (unchanged from the original implementation)                    #
 # --------------------------------------------------------------------------- #
 @dataclass
 class Dimension:
@@ -220,7 +265,11 @@ class RadialAirgap:
         if c.type in ("coaxiality", "runout"):
             return c.value / 2.0
         if c.type == "bearingClearance":
-            return c.value
+            # ISO 5753 "radial internal clearance" is itself a diametral
+            # (peak-to-peak) spec -- the distance one ring can move from one
+            # side to the opposite side -- so halve it the same way the
+            # other diametral contributor types above already are.
+            return c.value / 2.0
         return c.value
 
     def compute(self, dims: Dict[str, Dimension], fits: Dict[str, Fit]):
@@ -385,12 +434,12 @@ def _build_seed_model() -> Model:
     housing_bore = m.add_dimension("Housing Bearing Bore", "Housing", 35.000, 0.018, 0.000)
     brg_width = m.add_dimension("Bearing Width", "Bearing", 11.000, 0.000, 0.120)
     circlip_gap = m.add_dimension("Circlip Groove-to-Shoulder", "Shaft", 2.000, 0.050, 0.050)
-    shoulder_to_cover = m.add_dimension("Housing Shoulder-to-Cover Face", "Housing", 13.500, 0.100, 0.100)
+    shoulder_to_cover = m.add_dimension("Housing Shoulder-to-Cover Face", "Housing", 14.300, 0.100, 0.100)
     cover_thk = m.add_dimension("End Cover Thickness", "Housing", 3.000, 0.050, 0.050)
     stator_id = m.add_dimension("Stator ID", "Stator", 90.000, 0.050, 0.000)
     rotor_od = m.add_dimension("Rotor OD", "Rotor", 89.200, 0.000, 0.060)
 
-    fit_inner = m.add_fit("Bearing Inner Ring Fit", brg_bore.id, shaft_od.id)
+    m.add_fit("Bearing Inner Ring Fit", brg_bore.id, shaft_od.id)
     fit_outer = m.add_fit("Bearing Outer Ring Fit", housing_bore.id, brg_od.id)
 
     axial = m.add_stack("Bearing Axial Float")
@@ -406,7 +455,10 @@ def _build_seed_model() -> Model:
     m.add_link(retention, cover_thk.id, -1)
     m.add_link(retention, brg_width.id, -1)
     m.add_link(retention, circlip_gap.id, -1)
-    retention.target_min, retention.target_max = 0.0, None
+    # No target set deliberately -- this second demo stack shows the RSS
+    # method and the multi-stack picker rather than a worked pass/fail case;
+    # a made-up target here would just be a guess. Set your own once you've
+    # replaced these dimensions with real ones.
 
     m.radial.stator_id_dim_id = stator_id.id
     m.radial.rotor_od_dim_id = rotor_od.id
@@ -414,7 +466,7 @@ def _build_seed_model() -> Model:
     m.add_contributor("Bearing outer fit clearance", "fitClearance", fit_outer.id, 0.0)
     m.add_contributor("Rotor coaxiality (diametral)", "coaxiality", None, 0.030)
     m.add_contributor("Stator bore runout (diametral)", "runout", None, 0.020)
-    m.add_contributor("Bearing radial clearance", "bearingClearance", None, 0.010)
+    m.add_contributor("Bearing internal clearance (datasheet, diametral)", "bearingClearance", None, 0.010)
 
     return m
 
@@ -431,31 +483,57 @@ class EditableTreeview(ttk.Treeview):
     """
 
     def __init__(self, master, editable_cols=None, on_edit=None, **kw):
+        kw.setdefault("style", "Tol.Treeview")
         super().__init__(master, **kw)
         self.editable_cols = set(editable_cols or ())
         self.on_edit = on_edit
         self._editor = None
+        self._hover_cursor_on = False
         self.bind("<Double-1>", self._begin_edit)
+        # F-04: hover cursor distinguishes editable cells from read-only ones
+        # (Min/Max, group headers) -- previously a double-click on a
+        # read-only cell silently did nothing, with no cue beforehand.
+        self.bind("<Motion>", self._on_motion)
+        self.bind("<Leave>", lambda e: self._set_hover_cursor(False))
 
-    def _begin_edit(self, event):
+    def _editable_col_at(self, event):
+        """Return the resolved column id ('#0' or a data column name) under
+        the pointer if that cell is currently editable, else None."""
         region = self.identify("region", event.x, event.y)
         if region not in ("cell", "tree"):
-            return
+            return None
         row_id = self.identify_row(event.y)
         col = self.identify_column(event.x)
         if not row_id or not col:
-            return
+            return None
         if "noedit" in self.item(row_id, "tags"):
-            return
+            return None
         if col == "#0":
             col_id = "#0"
         else:
             cols = self["columns"]
             idx = int(col[1:]) - 1
             if idx < 0 or idx >= len(cols):
-                return
+                return None
             col_id = cols[idx]
-        if col_id not in self.editable_cols:
+        return col_id if col_id in self.editable_cols else None
+
+    def _set_hover_cursor(self, on):
+        if on == self._hover_cursor_on:
+            return
+        self._hover_cursor_on = on
+        try:
+            self.configure(cursor="xterm" if on else "")
+        except Exception:
+            pass
+
+    def _on_motion(self, event):
+        self._set_hover_cursor(self._editable_col_at(event) is not None)
+
+    def _begin_edit(self, event):
+        row_id = self.identify_row(event.y)
+        col_id = self._editable_col_at(event)
+        if col_id is None:
             return
         self.edit_cell(row_id, col_id)
 
@@ -469,10 +547,14 @@ class EditableTreeview(ttk.Treeview):
         x, y, w, h = bbox
         self._destroy_editor()
         current = self.item(row_id, "text") if col_id == "#0" else self.set(row_id, col_id)
-        entry = ttk.Entry(self, font=MONO_FONT)
+        entry = tk.Entry(self, font=F_MONO, relief="solid", bd=1,
+                         bg=C["surface"], fg=C["ink"],
+                         insertbackground=C["ink"],
+                         highlightthickness=1, highlightcolor=C["accent"],
+                         highlightbackground=C["accent"])
         entry.insert(0, current)
         entry.select_range(0, tk.END)
-        entry.place(x=x, y=y, width=max(w, 60), height=h)
+        entry.place(x=x, y=y, width=max(w, 70), height=h)
         entry.focus_set()
 
         def commit(_evt=None):
@@ -503,27 +585,135 @@ class EditableTreeview(ttk.Treeview):
             self._editor = None
 
 
-class ScrollableFrame(ttk.Frame):
-    """A vertically scrollable Canvas+Frame; scrolls only while the pointer
-    is over it, so it doesn't hijack the mouse wheel from sibling widgets."""
+class Segmented(tk.Frame):
+    """Small two-or-more-way segmented toggle built from tk.Buttons.
+    command(value) fires when the user picks a different value."""
 
-    def __init__(self, master, **kw):
+    def __init__(self, master, values, command=None, **kw):
+        kw.setdefault("bg", C["surface"])
         super().__init__(master, **kw)
-        self.canvas = tk.Canvas(self, highlightthickness=0)
-        self.vbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.inner = ttk.Frame(self.canvas)
-        self._win = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
-        self.inner.bind("<Configure>",
-                         lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfig(self._win, width=e.width))
-        self.canvas.configure(yscrollcommand=self.vbar.set)
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.vbar.pack(side="right", fill="y")
-        self.canvas.bind("<Enter>", lambda e: self.canvas.bind_all("<MouseWheel>", self._on_wheel))
-        self.canvas.bind("<Leave>", lambda e: self.canvas.unbind_all("<MouseWheel>"))
+        self.configure(highlightthickness=1, highlightbackground=C["border_strong"])
+        self.values = list(values)
+        self.command = command
+        self._value = self.values[0]
+        self._btns = {}
+        for v in self.values:
+            b = tk.Button(self, text=v, font=F_UI_B, relief="flat", bd=0,
+                          padx=14, pady=3, cursor="hand2",
+                          command=lambda vv=v: self._on_click(vv))
+            b.pack(side="left")
+            self._btns[v] = b
+        self._paint()
 
-    def _on_wheel(self, event):
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+    def _on_click(self, v):
+        if v != self._value:
+            self._value = v
+            self._paint()
+            if self.command:
+                self.command(v)
+
+    def get(self):
+        return self._value
+
+    def set(self, v):
+        if v in self._btns:
+            self._value = v
+            self._paint()
+
+    def _paint(self):
+        for v, b in self._btns.items():
+            if v == self._value:
+                b.configure(bg=C["accent"], fg="white",
+                            activebackground=C["accent_dark"], activeforeground="white")
+            else:
+                b.configure(bg=C["surface"], fg=C["muted"],
+                            activebackground=C["sunken"], activeforeground=C["ink"])
+
+
+class WrapBar(tk.Frame):
+    """A button-bar container that keeps every control reachable even in a
+    narrow window (F-02): items are packed left-to-right into a row, and a
+    new row starts once the running width would pass a conservative floor.
+    The split is decided once, as each item is added -- not recomputed live
+    against the window's actual width.
+
+    .add() takes a FACTORY (row_parent -> widget), not an already-built
+    widget: each widget is constructed directly against whichever row frame
+    it ends up in, so its real Tk parent and its pack container are always
+    the same widget. (Two earlier versions cut corners here -- live re-wrap
+    via .place() + a self-observing <Configure> binding fed back into a
+    resize loop that hung the app outright; packing an already-built widget
+    into a *different* frame via pack(in_=...) ran without error but
+    silently failed to clip/position correctly once more than one row
+    existed. Building against the real parent from the start avoids both.)
+    """
+
+    def __init__(self, master, min_row_width=640, **kw):
+        """min_row_width: how much width to assume is actually available
+        before wrapping. Pass the realistic figure for THIS bar's container,
+        not the window width -- a bar sharing its row with a fixed-width
+        side panel (e.g. Axial's chain editor next to the 380px result
+        card) has much less room than a bar spanning the full width."""
+        kw.setdefault("bg", C["sunken"])
+        super().__init__(master, **kw)
+        self.min_row_width = min_row_width
+        self._row = None
+        self._row_w = 0
+
+    def _new_row(self):
+        self._row = tk.Frame(self, bg=self["bg"])
+        self._row.pack(fill="x")
+        self._row_w = 0
+        return self._row
+
+    def add(self, factory, padx=(0, 6), pady=(6, 6)):
+        if isinstance(padx, int):
+            padx = (padx, padx)
+        if isinstance(pady, int):
+            pady = (pady, pady)
+        row = self._row if self._row is not None else self._new_row()
+        widget = factory(row)
+        widget.update_idletasks()
+        w = widget.winfo_reqwidth() + padx[0] + padx[1]
+        if self._row_w > 0 and self._row_w + w > self.min_row_width:
+            widget.destroy()
+            widget = factory(self._new_row())
+        widget.pack(side="left", padx=padx, pady=pady)
+        self._row_w += w
+        return widget
+
+
+def _btn(parent, text, command, kind="ghost", padx=13, pady=5):
+    """Flat tk.Button with hover states. kinds: primary / ghost / danger."""
+    spec = {
+        "primary": dict(bg=C["accent"], fg="white", hover=C["accent_dark"],
+                        border=C["accent"]),
+        "ghost":   dict(bg=C["surface"], fg=C["ink"], hover=C["sunken"],
+                        border=C["border_strong"]),
+        "danger":  dict(bg=C["surface"], fg=C["bad"], hover=C["bad_soft"],
+                        border=C["border_strong"]),
+    }[kind]
+    b = tk.Button(parent, text=text, command=command, font=F_UI_B,
+                  relief="flat", bd=0, padx=padx, pady=pady, cursor="hand2",
+                  bg=spec["bg"], fg=spec["fg"],
+                  activebackground=spec["hover"],
+                  activeforeground=spec["fg"] if kind != "primary" else "white",
+                  highlightthickness=1, highlightbackground=spec["border"])
+    b.bind("<Enter>", lambda e: b.configure(bg=spec["hover"]))
+    b.bind("<Leave>", lambda e: b.configure(bg=spec["bg"]))
+    return b
+
+
+def _card(parent, **kw):
+    kw.setdefault("bg", C["surface"])
+    f = tk.Frame(parent, highlightthickness=1,
+                 highlightbackground=C["border"], **kw)
+    return f
+
+
+def _pill(parent, text="", fg=C["muted"], bg=C["sunken"]):
+    return tk.Label(parent, text=text, font=F_UI_B, fg=fg, bg=bg,
+                    padx=10, pady=2)
 
 
 # --------------------------------------------------------------------------- #
@@ -535,12 +725,30 @@ class ToleranceStudioPage(ttk.Frame):
         self.data_path = data_path
         self.model = self._load_or_seed()
         self.active_stack_id = self.model.stacks[0].id if self.model.stacks else None
-        self._fit_widgets: Dict[str, dict] = {}
+        self._loading_editor = False  # reentrancy guard for detail editors
 
+        self._init_styles()
         self._build_ui()
         self.refresh_all()
         self._save()
         self.bind("<Destroy>", self._on_destroy)
+
+    # ------------------------------------------------------------------ #
+    #  Styles (all names prefixed Tol. -- nothing leaks to the host app)  #
+    # ------------------------------------------------------------------ #
+    def _init_styles(self):
+        st = ttk.Style(self)
+        st.configure("Tol.Treeview",
+                     background=C["surface"], fieldbackground=C["surface"],
+                     foreground=C["ink"], font=F_MONO, rowheight=26,
+                     borderwidth=0)
+        st.configure("Tol.Treeview.Heading",
+                     font=("Segoe UI Semibold", 9),
+                     foreground=C["muted"])
+        st.map("Tol.Treeview",
+               background=[("selected", C["accent_soft"])],
+               foreground=[("selected", C["ink"])])
+        st.configure("Tol.TCombobox", font=F_UI)
 
     # ------------------------------------------------------------------ #
     #  Persistence                                                        #
@@ -559,8 +767,21 @@ class ToleranceStudioPage(ttk.Frame):
         try:
             with open(self.data_path, "w", encoding="utf-8") as fh:
                 json.dump(self.model.to_dict(), fh, indent=2)
+            note, color = None, None  # written; indicator below is cosmetic
         except Exception as exc:
             print(f"[tolerance_studio] save failed: {exc}")
+            note, color = "⚠ save failed", C["bad"]
+        # The label may already be gone during teardown -- never let the
+        # cosmetic indicator turn a successful save into an error.
+        try:
+            if hasattr(self, "saved_lbl") and self.saved_lbl.winfo_exists():
+                if note is None:
+                    import datetime
+                    note, color = (f"✓ saved {datetime.datetime.now():%H:%M:%S}",
+                                   C["faint"])
+                self.saved_lbl.configure(text=note, fg=color)
+        except Exception:
+            pass
 
     def _on_destroy(self, event):
         if event.widget is self:
@@ -604,52 +825,168 @@ class ToleranceStudioPage(ttk.Frame):
     #  UI construction                                                    #
     # ------------------------------------------------------------------ #
     def _build_ui(self):
-        style = ttk.Style(self)
-        style.configure("Mono.Treeview", font=MONO_FONT, rowheight=22)
-        style.configure("Mono.Treeview.Heading", font=(MONO_FONT[0], MONO_FONT[1], "bold"))
+        outer = tk.Frame(self, bg=C["bg"])
+        outer.pack(fill="both", expand=True)
 
-        self.nb = ttk.Notebook(self)
-        self.nb.pack(fill="both", expand=True)
+        self._build_header(outer)
+        self._build_nav(outer)
 
-        self.dim_tab = ttk.Frame(self.nb)
-        self.fits_tab = ttk.Frame(self.nb)
-        self.axial_tab = ttk.Frame(self.nb)
-        self.radial_tab = ttk.Frame(self.nb)
-        self.summary_tab = ttk.Frame(self.nb)
+        holder = tk.Frame(outer, bg=C["bg"])
+        holder.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+        holder.grid_rowconfigure(0, weight=1)
+        holder.grid_columnconfigure(0, weight=1)
 
-        self.nb.add(self.dim_tab, text="Dimensions")
-        self.nb.add(self.fits_tab, text="Fits")
-        self.nb.add(self.axial_tab, text="Axial Stack-up")
-        self.nb.add(self.radial_tab, text="Radial Air-gap")
-        self.nb.add(self.summary_tab, text="Summary")
+        self.views = {}
+        for key in ("dims", "fits", "axial", "radial", "summary"):
+            v = tk.Frame(holder, bg=C["bg"])
+            v.grid(row=0, column=0, sticky="nsew")
+            self.views[key] = v
 
-        self._build_dimensions_tab()
-        self._build_fits_tab()
-        self._build_axial_tab()
-        self._build_radial_tab()
-        self._build_summary_tab()
+        self._build_dimensions_view(self.views["dims"])
+        self._build_fits_view(self.views["fits"])
+        self._build_axial_view(self.views["axial"])
+        self._build_radial_view(self.views["radial"])
+        self._build_summary_view(self.views["summary"])
 
-    # ---- Dimensions tab ----
-    def _build_dimensions_tab(self):
-        top = ttk.Frame(self.dim_tab)
-        top.pack(fill="x", padx=8, pady=6)
-        ttk.Button(top, text="Add", command=self._add_dimension).pack(side="left", padx=2)
-        ttk.Button(top, text="Duplicate", command=self._duplicate_dimension).pack(side="left", padx=2)
-        ttk.Button(top, text="Delete", command=self._delete_dimension).pack(side="left", padx=2)
+        self._select_view("dims")
 
+    # ---- header ----
+    def _build_header(self, parent):
+        head = tk.Frame(parent, bg=C["surface"])
+        head.pack(fill="x")
+        tk.Frame(parent, bg=C["border"], height=1).pack(fill="x")
+
+        left = tk.Frame(head, bg=C["surface"])
+        left.pack(side="left", padx=16, pady=(10, 8))
+        tk.Label(left, text="Tolerance & Stack-up Studio", font=F_H1,
+                 fg=C["ink"], bg=C["surface"]).pack(anchor="w")
+        tk.Label(left, text="Dimensions → fits → axial chains → radial air-gap, all live",
+                 font=F_SMALL, fg=C["faint"], bg=C["surface"]).pack(anchor="w")
+
+        right = tk.Frame(head, bg=C["surface"])
+        right.pack(side="right", padx=16)
+        self.saved_lbl = tk.Label(right, text="", font=F_SMALL,
+                                  fg=C["faint"], bg=C["surface"])
+        self.saved_lbl.pack(side="right", padx=(12, 0))
+        self.chip_gap = _pill(right)
+        self.chip_gap.pack(side="right", padx=3)
+        self.chip_stacks = _pill(right)
+        self.chip_stacks.pack(side="right", padx=3)
+        self.chip_fits = _pill(right)
+        self.chip_fits.pack(side="right", padx=3)
+        # Project load/save -- separate from the silent per-edit autosave to
+        # data_path (that one never needs a click). These are the explicit,
+        # named-file counterpart: "Save Project As" snapshots the current
+        # model to a file of your choice; "Load Project" replaces the whole
+        # model with one you pick, then that becomes what autosaves from
+        # here on. Same JSON shape either way, so the two are interchangeable.
+        _btn(right, "💾 Save Project As…", self._save_project_as).pack(side="right", padx=(12, 3))
+        _btn(right, "📁 Load Project…", self._load_project).pack(side="right", padx=3)
+
+    def _update_chips(self):
+        dims = self.model.dims_by_id()
+        fits = self.model.fits_by_id()
+
+        n_invalid = sum(1 for f in self.model.fits
+                        if f.classification(dims) == "Invalid")
+        if n_invalid:
+            self.chip_fits.configure(text=f"Fits {len(self.model.fits)} · {n_invalid} invalid",
+                                     fg=C["warn"], bg=C["warn_soft"])
+        else:
+            self.chip_fits.configure(text=f"Fits {len(self.model.fits)}",
+                                     fg=C["muted"], bg=C["sunken"])
+
+        judged = [s.compute(dims)["pass"] for s in self.model.stacks]
+        judged = [p for p in judged if p is not None]
+        if judged:
+            n_pass = sum(1 for p in judged if p)
+            ok = n_pass == len(judged)
+            self.chip_stacks.configure(
+                text=f"Stacks {n_pass}/{len(judged)} pass",
+                fg=C["good"] if ok else C["bad"],
+                bg=C["good_soft"] if ok else C["bad_soft"])
+        else:
+            self.chip_stacks.configure(text=f"Stacks {len(self.model.stacks)}",
+                                       fg=C["muted"], bg=C["sunken"])
+
+        r = self.model.radial.compute(dims, fits)
+        if r is None:
+            self.chip_gap.configure(text="Air-gap —", fg=C["muted"], bg=C["sunken"])
+        else:
+            ok = min(r["min_airgap_wc"], r["min_airgap_rss"]) > 0
+            self.chip_gap.configure(
+                text=f"Air-gap {'OK' if ok else 'RISK'}",
+                fg=C["good"] if ok else C["bad"],
+                bg=C["good_soft"] if ok else C["bad_soft"])
+
+    # ---- nav ----
+    _NAV = [("dims", "Dimensions"), ("fits", "Fits"),
+            ("axial", "Axial Stack-up"), ("radial", "Radial Air-gap"),
+            ("summary", "Summary")]
+
+    def _build_nav(self, parent):
+        bar = tk.Frame(parent, bg=C["bg"])
+        bar.pack(fill="x", padx=14, pady=10)
+        self._nav_btns = {}
+        for key, label in self._NAV:
+            b = tk.Button(bar, text=label, font=F_UI_B, relief="flat", bd=0,
+                          padx=16, pady=6, cursor="hand2",
+                          command=lambda k=key: self._select_view(k))
+            b.pack(side="left", padx=(0, 6))
+            self._nav_btns[key] = b
+
+    def _select_view(self, key):
+        self._active_view = key
+        for k, b in self._nav_btns.items():
+            if k == key:
+                b.configure(bg=C["accent"], fg="white",
+                            activebackground=C["accent_dark"],
+                            activeforeground="white")
+            else:
+                b.configure(bg=C["surface"], fg=C["muted"],
+                            activebackground=C["sunken"],
+                            activeforeground=C["ink"])
+        self.views[key].tkraise()
+
+    # ================================================================== #
+    #  Dimensions view                                                    #
+    # ================================================================== #
+    def _build_dimensions_view(self, parent):
+        card = _card(parent)
+        card.pack(fill="both", expand=True)
+
+        toolbar = tk.Frame(card, bg=C["sunken"])
+        toolbar.pack(fill="x")
+        bar = WrapBar(toolbar)
+        bar.pack(fill="x")
+        bar.add(lambda p: _btn(p, "＋ Add Dimension", self._add_dimension, "primary"), padx=(10, 4), pady=8)
+        bar.add(lambda p: _btn(p, "Duplicate", self._duplicate_dimension), padx=4, pady=8)
+        bar.add(lambda p: _btn(p, "Delete", self._delete_dimension, "danger"), padx=4, pady=8)
+        tk.Label(toolbar, text="Double-click a Name / Nominal / Tol cell to edit — Min · Max · every fit and stack update live",
+                 font=F_SMALL, fg=C["faint"], bg=C["sunken"], anchor="w"
+                 ).pack(fill="x", padx=12, pady=(0, 6))
+
+        wrap = tk.Frame(card, bg=C["surface"])
+        wrap.pack(fill="both", expand=True, padx=1, pady=1)
         self.dim_tree = EditableTreeview(
-            self.dim_tab, columns=("nominal", "tol_up", "tol_lo", "min", "max"),
+            wrap, columns=("nominal", "tol_up", "tol_lo", "min", "max"),
             show="tree headings", editable_cols={"#0", "nominal", "tol_up", "tol_lo"},
-            on_edit=self._on_dim_cell_edit, style="Mono.Treeview", height=18)
-        self.dim_tree.heading("#0", text="Name / Group")
-        self.dim_tree.column("#0", width=230, anchor="w")
-        for cid, text in (("nominal", "Nominal"), ("tol_up", "+Tol"), ("tol_lo", "-Tol"),
-                          ("min", "Min"), ("max", "Max")):
+            on_edit=self._on_dim_cell_edit, height=18)
+        self.dim_tree.heading("#0", text="NAME / GROUP")
+        self.dim_tree.column("#0", width=300, anchor="w")
+        for cid, text in (("nominal", "NOMINAL"), ("tol_up", "+TOL"), ("tol_lo", "−TOL"),
+                          ("min", "MIN (live)"), ("max", "MAX (live)")):
             self.dim_tree.heading(cid, text=text)
-            self.dim_tree.column(cid, width=80, anchor="e")
-        self.dim_tree.tag_configure("noedit", background="#eef1f4",
-                                     font=(MONO_FONT[0], MONO_FONT[1], "bold"))
-        self.dim_tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+            self.dim_tree.column(cid, width=98, anchor="e")
+        self.dim_tree.tag_configure("noedit", background=C["sunken"],
+                                     font=("Segoe UI Semibold", 10),
+                                     foreground=C["muted"])
+        self.dim_tree.tag_configure("odd", background=C["surface"])
+        self.dim_tree.tag_configure("even", background=C["sunken"])
+        vs = ttk.Scrollbar(wrap, orient="vertical", command=self.dim_tree.yview)
+        self.dim_tree.configure(yscrollcommand=vs.set)
+        self.dim_tree.pack(side="left", fill="both", expand=True)
+        vs.pack(side="right", fill="y")
 
     def _selected_group_or_default(self) -> str:
         sel = self.dim_tree.selection()
@@ -667,7 +1004,7 @@ class ToleranceStudioPage(ttk.Frame):
         d = self.model.add_dimension(name="New Dimension", group=group)
         self._save()
         self.refresh_all()
-        self.nb.select(self.dim_tab)
+        self._select_view("dims")
         try:
             self.dim_tree.item(f"grp::{group}", open=True)
         except Exception:
@@ -749,11 +1086,13 @@ class ToleranceStudioPage(ttk.Frame):
 
         for group in sorted(groups.keys()):
             gid = f"grp::{group}"
-            self.dim_tree.insert("", "end", iid=gid, text=group,
+            self.dim_tree.insert("", "end", iid=gid, text=f"  {group}",
                                   values=("", "", "", "", ""), tags=("noedit",),
                                   open=(gid in open_groups or not open_groups))
-            for d in sorted(groups[group], key=lambda x: x.name.lower()):
-                self.dim_tree.insert(gid, "end", iid=d.id, text=d.name, values=(
+            for i, d in enumerate(sorted(groups[group], key=lambda x: x.name.lower())):
+                self.dim_tree.insert(gid, "end", iid=d.id, text=d.name,
+                                      tags=("even" if i % 2 else "odd",),
+                                      values=(
                     f"{d.nominal:.3f}", f"{d.tol_up:+.3f}", f"{d.tol_lo:+.3f}",
                     f"{d.min:.3f}", f"{d.max:.3f}"))
         if sel:
@@ -763,7 +1102,7 @@ class ToleranceStudioPage(ttk.Frame):
                 pass
 
     def _jump_to_dimension(self, dim_id):
-        self.nb.select(self.dim_tab)
+        self._select_view("dims")
         d = self.model.dim_by_id(dim_id)
         if d is None:
             return
@@ -777,193 +1116,349 @@ class ToleranceStudioPage(ttk.Frame):
         except Exception:
             pass
 
-    # ---- Fits tab ----
-    def _build_fits_tab(self):
-        top = ttk.Frame(self.fits_tab)
-        top.pack(fill="x", padx=8, pady=6)
-        ttk.Button(top, text="Add Fit", command=self._add_fit).pack(side="left", padx=2)
+    # ================================================================== #
+    #  Fits view (master table + detail editor)                          #
+    # ================================================================== #
+    def _build_fits_view(self, parent):
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
 
-        self.fits_scroll = ScrollableFrame(self.fits_tab)
-        self.fits_scroll.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        card = _card(parent)
+        card.grid(row=0, column=0, sticky="nsew")
+
+        toolbar = tk.Frame(card, bg=C["sunken"])
+        toolbar.pack(fill="x")
+        bar = WrapBar(toolbar)
+        bar.pack(fill="x")
+        bar.add(lambda p: _btn(p, "＋ Add Fit", self._add_fit, "primary"), padx=(10, 4), pady=8)
+        bar.add(lambda p: _btn(p, "Delete Fit", self._delete_selected_fit, "danger"), padx=4, pady=8)
+        tk.Label(toolbar, text="Select a fit to edit it in the panel on the right",
+                 font=F_SMALL, fg=C["faint"], bg=C["sunken"], anchor="w"
+                 ).pack(fill="x", padx=12, pady=(0, 6))
+
+        body = tk.Frame(card, bg=C["surface"])
+        body.pack(fill="both", expand=True)
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=1)
+
+        wrap = tk.Frame(body, bg=C["surface"])
+        wrap.grid(row=0, column=0, sticky="nsew", padx=1, pady=1)
+        self.fits_tree = ttk.Treeview(
+            wrap, columns=("name", "hole", "shaft", "mn", "mx", "cls"),
+            show="headings", style="Tol.Treeview", height=14)
+        for cid, text, w, anchor in (
+                ("name", "FIT", 190, "w"), ("hole", "HOLE DIMENSION", 200, "w"),
+                ("shaft", "SHAFT DIMENSION", 200, "w"),
+                ("mn", "MIN CLEAR", 95, "e"), ("mx", "MAX CLEAR", 95, "e"),
+                ("cls", "CLASS", 110, "center")):
+            self.fits_tree.heading(cid, text=text)
+            self.fits_tree.column(cid, width=w, anchor=anchor)
+        for cls, (fg, bg) in CLS_COLORS.items():
+            self.fits_tree.tag_configure(f"cls_{cls}", foreground=C["ink"], background=bg)
+        vs = ttk.Scrollbar(wrap, orient="vertical", command=self.fits_tree.yview)
+        self.fits_tree.configure(yscrollcommand=vs.set)
+        self.fits_tree.pack(side="left", fill="both", expand=True)
+        vs.pack(side="right", fill="y")
+        self.fits_tree.bind("<<TreeviewSelect>>", self._on_fit_select)
+
+        # -- detail editor --
+        editor = tk.Frame(body, bg=C["surface"], width=300)
+        editor.grid(row=0, column=1, sticky="ns", padx=(0, 1), pady=1)
+        editor.grid_propagate(False)
+        tk.Frame(body, bg=C["border"], width=1).grid(row=0, column=1, sticky="nsw")
+
+        pad = dict(anchor="w", padx=16)
+        tk.Label(editor, text="FIT DETAILS", font=("Segoe UI Semibold", 9),
+                 fg=C["faint"], bg=C["surface"]).pack(pady=(14, 8), **pad)
+
+        tk.Label(editor, text="Name", font=F_SMALL, fg=C["muted"], bg=C["surface"]).pack(**pad)
+        self.fit_name_entry = tk.Entry(editor, font=F_UI, relief="solid", bd=1,
+                                       bg=C["surface"], fg=C["ink"],
+                                       highlightthickness=1,
+                                       highlightbackground=C["border"],
+                                       highlightcolor=C["accent"])
+        self.fit_name_entry.pack(fill="x", padx=16, pady=(2, 10))
+        self.fit_name_entry.bind("<Return>", self._commit_fit_editor)
+        self.fit_name_entry.bind("<FocusOut>", self._commit_fit_editor)
+
+        tk.Label(editor, text="Hole dimension (bore / ID)", font=F_SMALL,
+                 fg=C["muted"], bg=C["surface"]).pack(**pad)
+        self.fit_hole_cb = ttk.Combobox(editor, state="readonly", font=F_UI)
+        self.fit_hole_cb.pack(fill="x", padx=16, pady=(2, 10))
+        self.fit_hole_cb.bind("<<ComboboxSelected>>", self._commit_fit_editor)
+
+        tk.Label(editor, text="Shaft dimension (OD)", font=F_SMALL,
+                 fg=C["muted"], bg=C["surface"]).pack(**pad)
+        self.fit_shaft_cb = ttk.Combobox(editor, state="readonly", font=F_UI)
+        self.fit_shaft_cb.pack(fill="x", padx=16, pady=(2, 14))
+        self.fit_shaft_cb.bind("<<ComboboxSelected>>", self._commit_fit_editor)
+
+        self.fit_badge = tk.Label(editor, text="—", font=F_UI_B, padx=12, pady=4,
+                                  fg=C["muted"], bg=C["sunken"])
+        self.fit_badge.pack(**pad)
+        self.fit_clear_lbl = tk.Label(editor, text="", font=F_MONO_B,
+                                      fg=C["ink"], bg=C["surface"], justify="left")
+        self.fit_clear_lbl.pack(pady=(10, 0), **pad)
+        tk.Label(editor,
+                 text="max clear = hole.max − shaft.min\nmin clear = hole.min − shaft.max",
+                 font=F_SMALL, fg=C["faint"], bg=C["surface"],
+                 justify="left").pack(pady=(10, 0), **pad)
+        self._fit_editor_placeholder = tk.Label(
+            editor, text="", font=F_SMALL, fg=C["faint"], bg=C["surface"])
+        self._fit_editor_placeholder.pack(**pad)
+
+    def _selected_fit(self) -> Optional[Fit]:
+        sel = self.fits_tree.selection()
+        if not sel:
+            return None
+        return next((f for f in self.model.fits if f.id == sel[0]), None)
 
     def _add_fit(self):
-        self.model.add_fit(name=f"Fit {len(self.model.fits) + 1}")
+        f = self.model.add_fit(name=f"Fit {len(self.model.fits) + 1}")
+        self._save()
+        self.refresh_all()
+        try:
+            self.fits_tree.selection_set(f.id)
+            self.fits_tree.see(f.id)
+        except Exception:
+            pass
+
+    def _delete_selected_fit(self):
+        f = self._selected_fit()
+        if f is None:
+            return
+        if not messagebox.askyesno("Delete Fit", f"Delete fit '{f.name}'?"):
+            return
+        self.model.delete_fit(f.id)
         self._save()
         self.refresh_all()
 
-    def _delete_fit(self, fid):
-        if not messagebox.askyesno("Delete Fit", "Delete this fit?"):
-            return
+    def _delete_fit(self, fid):  # back-compat entry point
         self.model.delete_fit(fid)
         self._save()
         self.refresh_all()
 
-    def _build_fit_card(self, parent, fit: Fit):
-        card = ttk.LabelFrame(parent, text="Fit")
-        card.pack(fill="x", padx=6, pady=6)
+    def _on_fit_select(self, _evt=None):
+        self._load_fit_editor()
 
-        top = ttk.Frame(card)
-        top.pack(fill="x", padx=8, pady=(8, 4))
-        name_var = tk.StringVar(value=fit.name)
-        name_entry = ttk.Entry(top, textvariable=name_var, width=22)
-        name_entry.pack(side="left")
+    def _load_fit_editor(self):
+        self._loading_editor = True
+        try:
+            f = self._selected_fit()
+            names = sorted(self._dim_name_map().keys())
+            self.fit_hole_cb["values"] = names
+            self.fit_shaft_cb["values"] = names
+            if f is None:
+                self.fit_name_entry.delete(0, tk.END)
+                self.fit_hole_cb.set("")
+                self.fit_shaft_cb.set("")
+                self.fit_badge.configure(text="—", fg=C["muted"], bg=C["sunken"])
+                self.fit_clear_lbl.configure(text="")
+                self._fit_editor_placeholder.configure(
+                    text="Select a fit in the table,\nor click “＋ Add Fit”.")
+                return
+            self._fit_editor_placeholder.configure(text="")
+            id_to_disp = self._dim_id_to_display()
+            self.fit_name_entry.delete(0, tk.END)
+            self.fit_name_entry.insert(0, f.name)
+            self.fit_hole_cb.set(id_to_disp.get(f.hole_dim_id, ""))
+            self.fit_shaft_cb.set(id_to_disp.get(f.shaft_dim_id, ""))
 
-        def commit_name(_evt=None):
-            fit.name = name_var.get().strip() or fit.name
-            self._save()
-            self.refresh_summary_tab()
+            dims = self.model.dims_by_id()
+            cls = f.classification(dims)
+            fg, bg = CLS_COLORS[cls]
+            self.fit_badge.configure(text=cls.upper(), fg=fg, bg=bg)
+            self.fit_clear_lbl.configure(
+                text=f"min clear  {_fmt(f.min_clear(dims))}\n"
+                     f"max clear  {_fmt(f.max_clear(dims))}")
+        finally:
+            self._loading_editor = False
 
-        name_entry.bind("<Return>", commit_name)
-        name_entry.bind("<FocusOut>", commit_name)
-
-        ttk.Label(top, text="  Hole:").pack(side="left")
-        hole_cb = ttk.Combobox(top, state="readonly", width=20)
-        hole_cb.pack(side="left")
-        ttk.Label(top, text="  Shaft:").pack(side="left")
-        shaft_cb = ttk.Combobox(top, state="readonly", width=20)
-        shaft_cb.pack(side="left")
-
-        ttk.Button(top, text="Delete",
-                   command=lambda: self._delete_fit(fit.id)).pack(side="right")
-
-        bottom = ttk.Frame(card)
-        bottom.pack(fill="x", padx=8, pady=(0, 8))
-        badge = tk.Label(bottom, text="—", bg=BADGE_COLORS["Invalid"], fg="white",
-                          font=("Segoe UI", 9, "bold"), padx=8, pady=2)
-        badge.pack(side="left")
-        detail = tk.Label(bottom, text="", font=MONO_FONT)
-        detail.pack(side="left", padx=10)
-
-        self._fit_widgets[fit.id] = {
-            "card": card, "name_var": name_var, "hole_cb": hole_cb,
-            "shaft_cb": shaft_cb, "badge": badge, "detail": detail,
-        }
-
-        def on_hole(_evt=None):
-            fit.hole_dim_id = self._dim_name_map().get(hole_cb.get(), fit.hole_dim_id)
-            self._save()
-            self.refresh_fit_badge(fit.id)
-            self.refresh_summary_tab()
-
-        def on_shaft(_evt=None):
-            fit.shaft_dim_id = self._dim_name_map().get(shaft_cb.get(), fit.shaft_dim_id)
-            self._save()
-            self.refresh_fit_badge(fit.id)
-            self.refresh_summary_tab()
-
-        hole_cb.bind("<<ComboboxSelected>>", on_hole)
-        shaft_cb.bind("<<ComboboxSelected>>", on_shaft)
+    def _commit_fit_editor(self, _evt=None):
+        if self._loading_editor:
+            return
+        f = self._selected_fit()
+        if f is None:
+            return
+        f.name = self.fit_name_entry.get().strip() or f.name
+        names = self._dim_name_map()
+        hole = names.get(self.fit_hole_cb.get())
+        shaft = names.get(self.fit_shaft_cb.get())
+        if hole:
+            f.hole_dim_id = hole
+        if shaft:
+            f.shaft_dim_id = shaft
+        self._save()
+        self.refresh_all()
+        try:
+            self.fits_tree.selection_set(f.id)
+        except Exception:
+            pass
 
     def refresh_fits_tab(self):
-        model_ids = {f.id for f in self.model.fits}
-        for fid in list(self._fit_widgets.keys()):
-            if fid not in model_ids:
-                self._fit_widgets.pop(fid)["card"].destroy()
-        for f in self.model.fits:
-            if f.id not in self._fit_widgets:
-                self._build_fit_card(self.fits_scroll.inner, f)
-
-        names = sorted(self._dim_name_map().keys())
+        sel = self.fits_tree.selection()
+        for iid in self.fits_tree.get_children():
+            self.fits_tree.delete(iid)
+        dims = self.model.dims_by_id()
         id_to_disp = self._dim_id_to_display()
         for f in self.model.fits:
-            w = self._fit_widgets[f.id]
-            w["hole_cb"]["values"] = names
-            w["shaft_cb"]["values"] = names
-            w["hole_cb"].set(id_to_disp.get(f.hole_dim_id, ""))
-            w["shaft_cb"].set(id_to_disp.get(f.shaft_dim_id, ""))
-            if w["name_var"].get() != f.name:
-                w["name_var"].set(f.name)
-            self.refresh_fit_badge(f.id)
+            cls = f.classification(dims)
+            self.fits_tree.insert("", "end", iid=f.id, tags=(f"cls_{cls}",),
+                                   values=(
+                f.name,
+                id_to_disp.get(f.hole_dim_id, "(missing)"),
+                id_to_disp.get(f.shaft_dim_id, "(missing)"),
+                _fmt(f.min_clear(dims)), _fmt(f.max_clear(dims)),
+                cls))
+        if sel:
+            try:
+                self.fits_tree.selection_set(sel)
+            except Exception:
+                pass
+        self._load_fit_editor()
 
-    def refresh_fit_badge(self, fid):
-        f = next((x for x in self.model.fits if x.id == fid), None)
-        w = self._fit_widgets.get(fid)
-        if f is None or w is None:
-            return
-        dims = self.model.dims_by_id()
-        cls = f.classification(dims)
-        mn, mx = f.min_clear(dims), f.max_clear(dims)
-        w["badge"].configure(text=cls.upper(), bg=BADGE_COLORS.get(cls, BADGE_COLORS["Invalid"]))
-        w["detail"].configure(text=f"min={_fmt(mn)}  max={_fmt(mx)}")
+    # ================================================================== #
+    #  Axial stack-up view                                                #
+    # ================================================================== #
+    def _build_axial_view(self, parent):
+        # -- stack selector row --
+        selrow = _card(parent)
+        selrow.pack(fill="x", pady=(0, 10))
+        inner = WrapBar(selrow, bg=C["surface"])
+        inner.pack(fill="x", padx=10, pady=8)
+        inner.add(lambda p: tk.Label(p, text="Stack", font=F_UI_B, fg=C["muted"],
+                                     bg=C["surface"]), padx=(4, 8))
 
-    # ---- Axial Stack-up tab ----
-    def _build_axial_tab(self):
-        top = ttk.Frame(self.axial_tab)
-        top.pack(fill="x", padx=8, pady=6)
-        ttk.Label(top, text="Stack:").pack(side="left")
-        self.stack_cb = ttk.Combobox(top, state="readonly", width=28)
-        self.stack_cb.pack(side="left", padx=(4, 8))
-        self.stack_cb.bind("<<ComboboxSelected>>", self._on_stack_selected)
-        ttk.Button(top, text="Add Stack", command=self._add_stack).pack(side="left", padx=2)
-        ttk.Button(top, text="Rename", command=self._rename_stack).pack(side="left", padx=2)
-        ttk.Button(top, text="Delete Stack", command=self._delete_stack).pack(side="left", padx=2)
+        def _mk_stack_cb(p):
+            cb = ttk.Combobox(p, state="readonly", width=30, font=F_UI)
+            cb.bind("<<ComboboxSelected>>", self._on_stack_selected)
+            return cb
+        self.stack_cb = inner.add(_mk_stack_cb, padx=(0, 10))
+        inner.add(lambda p: _btn(p, "＋ Add", self._add_stack), padx=3)
+        inner.add(lambda p: _btn(p, "Rename", self._rename_stack), padx=3)
+        inner.add(lambda p: _btn(p, "Delete", self._delete_stack, "danger"), padx=(3, 24))
 
-        method_frame = ttk.Frame(top)
-        method_frame.pack(side="right")
-        self.stack_method_var = tk.StringVar(value="WC")
-        ttk.Radiobutton(method_frame, text="Worst-Case", value="WC",
-                         variable=self.stack_method_var,
-                         command=self._on_stack_method_change).pack(side="left")
-        ttk.Radiobutton(method_frame, text="RSS", value="RSS",
-                         variable=self.stack_method_var,
-                         command=self._on_stack_method_change).pack(side="left")
+        inner.add(lambda p: tk.Label(p, text="Method", font=F_UI_B, fg=C["muted"],
+                                     bg=C["surface"]), padx=(0, 8))
 
-        body = ttk.Frame(self.axial_tab)
-        body.pack(fill="both", expand=True, padx=8, pady=4)
-        left = ttk.Frame(body)
-        left.pack(side="left", fill="both", expand=True)
-        right = ttk.Frame(body, width=340)
-        right.pack(side="right", fill="y")
-        right.pack_propagate(False)
+        def _mk_stack_seg(p):
+            return Segmented(p, ["WC", "RSS"], command=self._on_stack_method_change)
+        self.stack_method_seg = inner.add(_mk_stack_seg, padx=(0, 4))
 
-        self.link_tree = ttk.Treeview(left, columns=("sense", "dim", "contribution"),
-                                       show="headings", height=10, style="Mono.Treeview")
-        for cid, text, w in (("sense", "±", 40), ("dim", "Dimension", 190),
-                             ("contribution", "Contribution", 110)):
+        # -- chain editor / result+chart split: a real drag-to-resize divider
+        # (same tk.PanedWindow pattern the host app uses), not a fixed-width
+        # column -- drag it right to make the waterfall chart bigger, drag
+        # it left to give the link table more room. Each pane remembers
+        # nothing between sessions; it just starts at a sensible width.
+        paned = tk.PanedWindow(parent, orient=tk.HORIZONTAL, sashrelief=tk.RAISED,
+                               sashwidth=6, bg=C["border_strong"],
+                               bd=0, opaqueresize=True)
+        paned.pack(fill="both", expand=True)
+
+        # -- left: chain editor --
+        left = _card(paned)
+        paned.add(left, minsize=320, width=560, stretch="always")
+
+        # This bar shares the window with a resizable result/chart pane, so
+        # its available width varies as the user drags the sash -- use a
+        # conservative threshold rather than assuming generous space.
+        lbar = WrapBar(left, min_row_width=380)
+        lbar.pack(fill="x")
+        self.add_link_cb = lbar.add(
+            lambda p: ttk.Combobox(p, state="readonly", width=26, font=F_UI),
+            padx=(10, 4), pady=8)
+        lbar.add(lambda p: _btn(p, "＋ Add Link", self._add_link), padx=(3, 12), pady=8)
+        lbar.add(lambda p: _btn(p, "▲", lambda: self._move_link(-1), padx=8), padx=(0, 2), pady=8)
+        lbar.add(lambda p: _btn(p, "▼", lambda: self._move_link(1), padx=8), padx=2, pady=8)
+        lbar.add(lambda p: _btn(p, "±", self._toggle_link_sense, padx=8), padx=2, pady=8)
+        lbar.add(lambda p: _btn(p, "✕", self._remove_link, "danger", padx=8), padx=(2, 12), pady=8)
+        lbar.add(lambda p: _btn(p, "Edit Tol…", self._jump_to_dim_from_link), padx=2, pady=8)
+
+        lwrap = tk.Frame(left, bg=C["surface"])
+        lwrap.pack(fill="both", expand=True, padx=1, pady=1)
+        self.link_tree = ttk.Treeview(
+            lwrap, columns=("sense", "dim", "contribution", "mn", "mx"),
+            show="headings", style="Tol.Treeview", height=10)
+        for cid, text, w, anchor in (
+                ("sense", "±", 44, "center"), ("dim", "DIMENSION", 260, "w"),
+                ("contribution", "± NOMINAL", 105, "e"),
+                ("mn", "MIN", 90, "e"), ("mx", "MAX", 90, "e")):
             self.link_tree.heading(cid, text=text)
-            self.link_tree.column(cid, width=w, anchor=("center" if cid != "dim" else "w"))
-        self.link_tree.pack(fill="both", expand=True)
+            self.link_tree.column(cid, width=w, anchor=anchor)
+        self.link_tree.tag_configure("pos", foreground=C["good"])
+        self.link_tree.tag_configure("neg", foreground=C["warn"])
+        lvs = ttk.Scrollbar(lwrap, orient="vertical", command=self.link_tree.yview)
+        self.link_tree.configure(yscrollcommand=lvs.set)
+        self.link_tree.pack(side="left", fill="both", expand=True)
+        lvs.pack(side="right", fill="y")
 
-        link_btns = ttk.Frame(left)
-        link_btns.pack(fill="x", pady=4)
-        self.add_link_cb = ttk.Combobox(link_btns, state="readonly", width=20)
-        self.add_link_cb.pack(side="left", padx=(0, 4))
-        ttk.Button(link_btns, text="Add Link", command=self._add_link).pack(side="left", padx=2)
-        ttk.Button(link_btns, text="Remove Link", command=self._remove_link).pack(side="left", padx=2)
-        ttk.Button(link_btns, text="Move Up", command=lambda: self._move_link(-1)).pack(side="left", padx=2)
-        ttk.Button(link_btns, text="Move Down", command=lambda: self._move_link(1)).pack(side="left", padx=2)
-        ttk.Button(link_btns, text="Toggle ±", command=self._toggle_link_sense).pack(side="left", padx=2)
-        ttk.Button(link_btns, text="Edit Tol...", command=self._jump_to_dim_from_link).pack(side="left", padx=2)
+        tk.Label(left, text="＋ links grow the gap · − links consume it · ± flips the selected link",
+                 font=F_SMALL, fg=C["faint"], bg=C["surface"]).pack(anchor="w", padx=12, pady=(0, 8))
 
-        tgt = ttk.LabelFrame(left, text="Target (mm)")
-        tgt.pack(fill="x", pady=6)
-        ttk.Label(tgt, text="Min:").grid(row=0, column=0, padx=4, pady=6)
-        self.target_min_entry = ttk.Entry(tgt, width=10, font=MONO_FONT)
-        self.target_min_entry.grid(row=0, column=1, padx=4)
-        ttk.Label(tgt, text="Max:").grid(row=0, column=2, padx=4)
-        self.target_max_entry = ttk.Entry(tgt, width=10, font=MONO_FONT)
-        self.target_max_entry.grid(row=0, column=3, padx=4)
+        # -- right: result + chart --
+        right = tk.Frame(paned, bg=C["bg"])
+        paned.add(right, minsize=300, width=380, stretch="always")
+        right.grid_rowconfigure(1, weight=1)
+        right.grid_columnconfigure(0, weight=1)
+
+        res = _card(right)
+        res.grid(row=0, column=0, sticky="ew")
+        rin = tk.Frame(res, bg=C["surface"])
+        rin.pack(fill="x", padx=14, pady=12)
+        tk.Label(rin, text="RESULT", font=("Segoe UI Semibold", 9),
+                 fg=C["faint"], bg=C["surface"]).grid(row=0, column=0, sticky="w")
+        self.stack_pass_lbl = tk.Label(rin, text="—", font=F_UI_B, padx=14, pady=3,
+                                       fg=C["muted"], bg=C["sunken"])
+        self.stack_pass_lbl.grid(row=0, column=1, sticky="e")
+        rin.grid_columnconfigure(0, weight=1)
+
+        self.stack_nom_lbl = tk.Label(rin, text="—", font=F_MONO_XL,
+                                      fg=C["ink"], bg=C["surface"])
+        self.stack_nom_lbl.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.stack_range_lbl = tk.Label(rin, text="", font=F_MONO_B,
+                                        fg=C["muted"], bg=C["surface"])
+        self.stack_range_lbl.grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 8))
+
+        trow = tk.Frame(rin, bg=C["surface"])
+        trow.grid(row=3, column=0, columnspan=2, sticky="w")
+        tk.Label(trow, text="Target", font=F_SMALL, fg=C["muted"],
+                 bg=C["surface"]).pack(side="left", padx=(0, 6))
+        self.target_min_entry = tk.Entry(trow, width=8, font=F_MONO, relief="solid",
+                                         bd=1, justify="right", bg=C["surface"],
+                                         highlightthickness=1,
+                                         highlightbackground=C["border"],
+                                         highlightcolor=C["accent"])
+        self.target_min_entry.pack(side="left")
+        tk.Label(trow, text="…", font=F_SMALL, fg=C["faint"],
+                 bg=C["surface"]).pack(side="left", padx=4)
+        self.target_max_entry = tk.Entry(trow, width=8, font=F_MONO, relief="solid",
+                                         bd=1, justify="right", bg=C["surface"],
+                                         highlightthickness=1,
+                                         highlightbackground=C["border"],
+                                         highlightcolor=C["accent"])
+        self.target_max_entry.pack(side="left")
+        tk.Label(trow, text="mm", font=F_SMALL, fg=C["faint"],
+                 bg=C["surface"]).pack(side="left", padx=6)
         for e in (self.target_min_entry, self.target_max_entry):
             e.bind("<Return>", self._on_target_change)
             e.bind("<FocusOut>", self._on_target_change)
 
-        res = ttk.LabelFrame(left, text="Result")
-        res.pack(fill="x", pady=6)
-        self.stack_result_label = tk.Label(res, text="—", font=("Segoe UI", 11, "bold"),
-                                            anchor="w", justify="left")
-        self.stack_result_label.pack(fill="x", padx=8, pady=8)
-
-        chart_holder = ttk.LabelFrame(right, text="Chain")
-        chart_holder.pack(fill="both", expand=True)
+        chart = _card(right)
+        chart.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        tk.Label(chart, text="CHAIN WATERFALL", font=("Segoe UI Semibold", 9),
+                 fg=C["faint"], bg=C["surface"]).pack(anchor="w", padx=14, pady=(10, 0))
         if HAVE_MPL:
-            self.chain_fig = Figure(figsize=(3.6, 2.8), dpi=100)
+            self.chain_fig = Figure(figsize=(3.7, 3.0), dpi=100,
+                                    facecolor=C["surface"])
             self.chain_ax = self.chain_fig.add_subplot(111)
-            self.chain_canvas = FigureCanvasTkAgg(self.chain_fig, master=chart_holder)
-            self.chain_canvas.get_tk_widget().pack(fill="both", expand=True)
+            self.chain_canvas = FigureCanvasTkAgg(self.chain_fig, master=chart)
+            self.chain_canvas.get_tk_widget().configure(bg=C["surface"])
+            self.chain_canvas.get_tk_widget().pack(fill="both", expand=True,
+                                                   padx=8, pady=8)
         else:
-            ttk.Label(chart_holder,
-                      text="matplotlib not installed —\nchain chart unavailable.",
-                      foreground="#a05a00", justify="center").pack(padx=10, pady=20)
+            tk.Label(chart, text="matplotlib not installed —\nchain chart unavailable.",
+                     fg=C["warn"], bg=C["surface"], font=F_SMALL,
+                     justify="center").pack(padx=10, pady=24)
 
     def _on_stack_selected(self, _evt=None):
         sid = self._stack_name_map().get(self.stack_cb.get())
@@ -1056,11 +1551,11 @@ class ToleranceStudioPage(ttk.Frame):
             return
         self._jump_to_dimension(link.dim_id)
 
-    def _on_stack_method_change(self):
+    def _on_stack_method_change(self, _value=None):
         s = self._active_stack()
         if s is None:
             return
-        s.method = self.stack_method_var.get()
+        s.method = self.stack_method_seg.get()
         self._save()
         self.refresh_stack_tab()
 
@@ -1090,8 +1585,9 @@ class ToleranceStudioPage(ttk.Frame):
         dims = self.model.dims_by_id()
 
         if stack is None:
-            self.stack_result_label.configure(text="No stack selected. Click 'Add Stack' to start.",
-                                               fg="#666666")
+            self.stack_nom_lbl.configure(text="—")
+            self.stack_range_lbl.configure(text="No stack — click “＋ Add”.")
+            self.stack_pass_lbl.configure(text="—", fg=C["muted"], bg=C["sunken"])
             self.target_min_entry.delete(0, tk.END)
             self.target_max_entry.delete(0, tk.END)
             self._draw_chain()
@@ -1101,10 +1597,13 @@ class ToleranceStudioPage(ttk.Frame):
             d = dims.get(link.dim_id)
             name = d.name if d else "(missing dimension)"
             contrib = (link.sense * d.nominal) if d else None
-            self.link_tree.insert("", "end", iid=link.id,
-                                   values=("+" if link.sense > 0 else "-", name, _fmt(contrib)))
+            self.link_tree.insert(
+                "", "end", iid=link.id,
+                tags=("pos" if link.sense > 0 else "neg",),
+                values=("＋" if link.sense > 0 else "−", name, _fmt(contrib),
+                        _fmt(d.min) if d else "—", _fmt(d.max) if d else "—"))
 
-        self.stack_method_var.set(stack.method)
+        self.stack_method_seg.set(stack.method)
         self.target_min_entry.delete(0, tk.END)
         if stack.target_min is not None:
             self.target_min_entry.insert(0, _fmt(stack.target_min))
@@ -1113,16 +1612,18 @@ class ToleranceStudioPage(ttk.Frame):
             self.target_max_entry.insert(0, _fmt(stack.target_max))
 
         res = stack.compute(dims)
+        self.stack_nom_lbl.configure(text=f"{_fmt(res['nominal'])} mm")
+        note = (f"   ⚠ {res['invalid_links']} missing link(s)"
+                if res["invalid_links"] else "")
+        self.stack_range_lbl.configure(
+            text=f"range [{_fmt(res['min'])}, {_fmt(res['max'])}]  ({stack.method}){note}")
         pf = res["pass"]
-        pf_txt = "—" if pf is None else ("PASS" if pf else "FAIL")
-        pf_color = {"—": "#666666", "PASS": "#1b8a3a", "FAIL": "#c0392b"}[pf_txt]
-        invalid_note = (f"  ({res['invalid_links']} link(s) reference a missing dimension)"
-                         if res["invalid_links"] else "")
-        self.stack_result_label.configure(
-            text=(f"nominal = {_fmt(res['nominal'])} mm\n"
-                  f"range   = [{_fmt(res['min'])}, {_fmt(res['max'])}] mm\n"
-                  f"{pf_txt}{invalid_note}"),
-            fg=pf_color)
+        if pf is None:
+            self.stack_pass_lbl.configure(text="NO TARGET", fg=C["muted"], bg=C["sunken"])
+        elif pf:
+            self.stack_pass_lbl.configure(text="PASS", fg=C["good"], bg=C["good_soft"])
+        else:
+            self.stack_pass_lbl.configure(text="FAIL", fg=C["bad"], bg=C["bad_soft"])
 
         self._draw_chain()
 
@@ -1132,105 +1633,164 @@ class ToleranceStudioPage(ttk.Frame):
         stack = self._active_stack()
         ax = self.chain_ax
         ax.clear()
-        if stack is None or not stack.links:
-            ax.text(0.5, 0.5, "No links in this stack", ha="center", va="center",
-                     transform=ax.transAxes, fontsize=9, color="#888888")
+        ax.set_facecolor(C["surface"])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.spines["bottom"].set_visible(True)
+        ax.spines["bottom"].set_color(C["border_strong"])
+
+        dims = self.model.dims_by_id()
+        rows = ([] if stack is None else
+                [(l, dims.get(l.dim_id)) for l in stack.links])
+        rows = [(l, d) for l, d in rows if d is not None]
+        if not rows:
+            ax.text(0.5, 0.5, "No links in this stack",
+                    ha="center", va="center", transform=ax.transAxes,
+                    fontsize=9, color=C["faint"])
             ax.set_xticks([])
             ax.set_yticks([])
             self.chain_canvas.draw_idle()
             return
 
-        dims = self.model.dims_by_id()
+        # Horizontal waterfall: one row per link, running cumulative total.
         cum = 0.0
-        for link in stack.links:
-            d = dims.get(link.dim_id)
-            if d is None:
-                continue
+        labels = []
+        for i, (link, d) in enumerate(rows):
             delta = link.sense * d.nominal
-            left = cum if delta >= 0 else cum + delta
-            width = abs(delta)
-            color = "#2f8f4f" if link.sense > 0 else "#c9532b"
-            ax.barh(0, width, left=left, height=0.5, color=color, edgecolor="white")
-            if width > 0:
-                ax.text(left + width / 2, 0, d.name, ha="center", va="center",
-                         fontsize=7, color="white", clip_on=True)
-            cum += delta
+            left = min(cum, cum + delta)
+            color = C["good"] if link.sense > 0 else C["warn"]
+            ax.barh(i, abs(delta), left=left, height=0.55, color=color,
+                    edgecolor="white", linewidth=0.5, zorder=3)
+            new_cum = cum + delta
+            # thin connector down to the next row
+            if i < len(rows) - 1:
+                ax.plot([new_cum, new_cum], [i, i + 1], color=C["border_strong"],
+                        linewidth=0.8, zorder=2)
+            cum = new_cum
+            labels.append(d.name if len(d.name) <= 24 else d.name[:22] + "…")
 
-        if stack.target_min is not None:
-            ax.axvline(stack.target_min, color="#888888", linestyle="--", linewidth=1)
-        if stack.target_max is not None:
-            ax.axvline(stack.target_max, color="#888888", linestyle="--", linewidth=1)
-        ax.axvline(cum, color="#111111", linestyle="-", linewidth=1.2)
-        ax.set_yticks([])
-        ax.set_xlabel("mm", fontsize=8)
-        ax.tick_params(labelsize=8)
+        if stack.target_min is not None or stack.target_max is not None:
+            lo = stack.target_min if stack.target_min is not None else ax.get_xlim()[0]
+            hi = stack.target_max if stack.target_max is not None else ax.get_xlim()[1]
+            ax.axvspan(lo, hi, color=C["good"], alpha=0.08, zorder=1)
+        ax.axvline(cum, color=C["ink"], linewidth=1.2, zorder=4)
+        ax.axvline(0, color=C["border_strong"], linewidth=0.8, zorder=1)
+
+        ax.set_yticks(range(len(labels)))
+        ax.set_yticklabels(labels, fontsize=7, color=C["muted"])
+        ax.invert_yaxis()
+        ax.tick_params(axis="x", labelsize=7, colors=C["muted"])
+        ax.grid(axis="x", color=C["border"], linewidth=0.6, zorder=0)
+        ax.set_axisbelow(True)
+        ax.set_xlabel("mm", fontsize=8, color=C["muted"])
         try:
             self.chain_fig.tight_layout()
         except Exception:
             pass
         self.chain_canvas.draw_idle()
 
-    # ---- Radial Air-gap tab ----
-    def _build_radial_tab(self):
-        top = ttk.Frame(self.radial_tab)
-        top.pack(fill="x", padx=8, pady=6)
-        ttk.Label(top, text="Stator ID:").grid(row=0, column=0, sticky="w", padx=4, pady=2)
-        self.stator_cb = ttk.Combobox(top, state="readonly", width=22)
-        self.stator_cb.grid(row=0, column=1, padx=4)
-        ttk.Label(top, text="Rotor OD:").grid(row=0, column=2, sticky="w", padx=4)
-        self.rotor_cb = ttk.Combobox(top, state="readonly", width=22)
-        self.rotor_cb.grid(row=0, column=3, padx=4)
-        self.stator_cb.bind("<<ComboboxSelected>>", self._on_radial_dims_change)
-        self.rotor_cb.bind("<<ComboboxSelected>>", self._on_radial_dims_change)
+    # ================================================================== #
+    #  Radial air-gap view                                                #
+    # ================================================================== #
+    def _build_radial_view(self, parent):
+        # -- geometry row --
+        geo = _card(parent)
+        geo.pack(fill="x", pady=(0, 10))
+        gin = WrapBar(geo, bg=C["surface"])
+        gin.pack(fill="x", padx=10, pady=8)
+        gin.add(lambda p: tk.Label(p, text="Stator ID", font=F_UI_B, fg=C["muted"],
+                                   bg=C["surface"]), padx=(4, 6))
 
-        self.g0_label = tk.Label(top, text="g0 = —", font=("Segoe UI", 10, "bold"))
-        self.g0_label.grid(row=0, column=4, padx=16)
+        def _mk_stator_cb(p):
+            cb = ttk.Combobox(p, state="readonly", width=26, font=F_UI)
+            cb.bind("<<ComboboxSelected>>", self._on_radial_dims_change)
+            return cb
+        self.stator_cb = gin.add(_mk_stator_cb, padx=(0, 14))
+        gin.add(lambda p: tk.Label(p, text="Rotor OD", font=F_UI_B, fg=C["muted"],
+                                   bg=C["surface"]), padx=(0, 6))
 
-        method_frame = ttk.Frame(top)
-        method_frame.grid(row=0, column=5, padx=8)
-        self.radial_method_var = tk.StringVar(value="WC")
-        ttk.Radiobutton(method_frame, text="WC", value="WC", variable=self.radial_method_var,
-                         command=self._on_radial_method_change).pack(side="left")
-        ttk.Radiobutton(method_frame, text="RSS", value="RSS", variable=self.radial_method_var,
-                         command=self._on_radial_method_change).pack(side="left")
+        def _mk_rotor_cb(p):
+            cb = ttk.Combobox(p, state="readonly", width=26, font=F_UI)
+            cb.bind("<<ComboboxSelected>>", self._on_radial_dims_change)
+            return cb
+        self.rotor_cb = gin.add(_mk_rotor_cb, padx=(0, 24))
 
-        body = ttk.Frame(self.radial_tab)
-        body.pack(fill="both", expand=True, padx=8, pady=4)
-        left = ttk.Frame(body)
-        left.pack(side="left", fill="both", expand=True)
-        right = ttk.Frame(body, width=260)
-        right.pack(side="right", fill="y", padx=(10, 0))
-        right.pack_propagate(False)
+        self.g0_label = gin.add(
+            lambda p: tk.Label(p, text="g₀ = —", font=F_MONO_B,
+                               fg=C["accent"], bg=C["surface"]), padx=(0, 20))
+        gin.add(lambda p: tk.Label(p, text="Method", font=F_UI_B, fg=C["muted"],
+                                   bg=C["surface"]), padx=(0, 8))
 
-        self.radial_tree = ttk.Treeview(left, columns=("label", "type", "fit", "e"),
-                                         show="headings", height=8, style="Mono.Treeview")
-        for cid, text, w in (("label", "Label", 170), ("type", "Type", 120),
-                             ("fit", "Fit", 130), ("e", "e (mm)", 70)):
+        def _mk_radial_seg(p):
+            return Segmented(p, ["WC", "RSS"], command=self._on_radial_method_change)
+        self.radial_method_seg = gin.add(_mk_radial_seg, padx=(0, 4))
+
+        # -- contributors / result split: drag-to-resize, same as Axial.
+        paned = tk.PanedWindow(parent, orient=tk.HORIZONTAL, sashrelief=tk.RAISED,
+                               sashwidth=6, bg=C["border_strong"],
+                               bd=0, opaqueresize=True)
+        paned.pack(fill="both", expand=True)
+
+        # -- left: contributors --
+        left = _card(paned)
+        paned.add(left, minsize=320, width=560, stretch="always")
+
+        ctoolbar = tk.Frame(left, bg=C["sunken"])
+        ctoolbar.pack(fill="x")
+        # Shares its row with the 300px-wide result column -- same reasoning
+        # as Axial's lbar above.
+        cbar = WrapBar(ctoolbar, min_row_width=420)
+        cbar.pack(fill="x")
+        cbar.add(lambda p: _btn(p, "＋ Add Contributor", self._add_contributor, "primary"), padx=(10, 4), pady=8)
+        cbar.add(lambda p: _btn(p, "Remove", self._remove_contributor, "danger"), padx=4, pady=8)
+        tk.Label(ctoolbar, text="Eccentricity sources — each contributes e to rotor offset",
+                 font=F_SMALL, fg=C["faint"], bg=C["sunken"], anchor="w"
+                 ).pack(fill="x", padx=12, pady=(0, 6))
+
+        cwrap = tk.Frame(left, bg=C["surface"])
+        cwrap.pack(fill="both", expand=True, padx=1, pady=1)
+        self.radial_tree = ttk.Treeview(
+            cwrap, columns=("label", "type", "fit", "e"),
+            show="headings", style="Tol.Treeview", height=8)
+        for cid, text, w, anchor in (
+                ("label", "CONTRIBUTOR", 210, "w"), ("type", "TYPE", 130, "w"),
+                ("fit", "FROM FIT", 170, "w"), ("e", "e (mm)", 80, "e")):
             self.radial_tree.heading(cid, text=text)
-            self.radial_tree.column(cid, width=w, anchor=("w" if cid != "e" else "center"))
-        self.radial_tree.pack(fill="both", expand=True)
+            self.radial_tree.column(cid, width=w, anchor=anchor)
+        cvs = ttk.Scrollbar(cwrap, orient="vertical", command=self.radial_tree.yview)
+        self.radial_tree.configure(yscrollcommand=cvs.set)
+        self.radial_tree.pack(side="left", fill="both", expand=True)
+        cvs.pack(side="right", fill="y")
         self.radial_tree.bind("<<TreeviewSelect>>", self._on_radial_select)
 
-        btns = ttk.Frame(left)
-        btns.pack(fill="x", pady=4)
-        ttk.Button(btns, text="Add Contributor", command=self._add_contributor).pack(side="left", padx=2)
-        ttk.Button(btns, text="Remove", command=self._remove_contributor).pack(side="left", padx=2)
-
-        form = ttk.LabelFrame(left, text="Selected contributor")
-        form.pack(fill="x", pady=6)
-        ttk.Label(form, text="Label:").grid(row=0, column=0, padx=4, pady=6, sticky="w")
-        self.contrib_label_entry = ttk.Entry(form, width=26)
-        self.contrib_label_entry.grid(row=0, column=1, padx=4, pady=6)
-        ttk.Label(form, text="Type:").grid(row=0, column=2, padx=4, sticky="w")
-        self.contrib_type_cb = ttk.Combobox(form, state="readonly", width=16, values=(
-            "fitClearance", "coaxiality", "runout", "bearingClearance"))
-        self.contrib_type_cb.grid(row=0, column=3, padx=4)
-        ttk.Label(form, text="Fit:").grid(row=1, column=0, padx=4, pady=6, sticky="w")
-        self.contrib_fit_cb = ttk.Combobox(form, state="readonly", width=26)
-        self.contrib_fit_cb.grid(row=1, column=1, padx=4, pady=6)
-        ttk.Label(form, text="Value:").grid(row=1, column=2, padx=4, sticky="w")
-        self.contrib_value_entry = ttk.Entry(form, width=10, font=MONO_FONT)
-        self.contrib_value_entry.grid(row=1, column=3, padx=4)
+        form = tk.Frame(left, bg=C["surface"])
+        form.pack(fill="x", padx=12, pady=(6, 12))
+        tk.Label(form, text="Label", font=F_SMALL, fg=C["muted"],
+                 bg=C["surface"]).grid(row=0, column=0, sticky="w", padx=(0, 4))
+        self.contrib_label_entry = tk.Entry(form, width=26, font=F_UI, relief="solid",
+                                            bd=1, bg=C["surface"],
+                                            highlightthickness=1,
+                                            highlightbackground=C["border"],
+                                            highlightcolor=C["accent"])
+        self.contrib_label_entry.grid(row=1, column=0, padx=(0, 10), sticky="w")
+        tk.Label(form, text="Type", font=F_SMALL, fg=C["muted"],
+                 bg=C["surface"]).grid(row=0, column=1, sticky="w", padx=(0, 4))
+        self.contrib_type_cb = ttk.Combobox(form, state="readonly", width=16, font=F_UI,
+                                            values=("fitClearance", "coaxiality",
+                                                    "runout", "bearingClearance"))
+        self.contrib_type_cb.grid(row=1, column=1, padx=(0, 10), sticky="w")
+        tk.Label(form, text="Pull from fit", font=F_SMALL, fg=C["muted"],
+                 bg=C["surface"]).grid(row=0, column=2, sticky="w", padx=(0, 4))
+        self.contrib_fit_cb = ttk.Combobox(form, state="readonly", width=22, font=F_UI)
+        self.contrib_fit_cb.grid(row=1, column=2, padx=(0, 10), sticky="w")
+        tk.Label(form, text="Value (mm)", font=F_SMALL, fg=C["muted"],
+                 bg=C["surface"]).grid(row=0, column=3, sticky="w", padx=(0, 4))
+        self.contrib_value_entry = tk.Entry(form, width=9, font=F_MONO, relief="solid",
+                                            bd=1, justify="right", bg=C["surface"],
+                                            highlightthickness=1,
+                                            highlightbackground=C["border"],
+                                            highlightcolor=C["accent"])
+        self.contrib_value_entry.grid(row=1, column=3, sticky="w")
 
         for w in (self.contrib_label_entry, self.contrib_value_entry):
             w.bind("<Return>", self._on_contrib_form_commit)
@@ -1238,11 +1798,32 @@ class ToleranceStudioPage(ttk.Frame):
         self.contrib_type_cb.bind("<<ComboboxSelected>>", self._on_contrib_type_change)
         self.contrib_fit_cb.bind("<<ComboboxSelected>>", self._on_contrib_form_commit)
 
-        res = ttk.LabelFrame(right, text="Result")
-        res.pack(fill="x")
-        self.radial_result_label = tk.Label(res, text="—", justify="left", anchor="w",
-                                             font=("Segoe UI", 10))
-        self.radial_result_label.pack(fill="x", padx=8, pady=8)
+        # -- right: results --
+        res = _card(paned)
+        paned.add(res, minsize=260, width=300, stretch="always")
+        rin = tk.Frame(res, bg=C["surface"])
+        rin.pack(fill="both", expand=True, padx=16, pady=14)
+        tk.Label(rin, text="AIR-GAP RESULT", font=("Segoe UI Semibold", 9),
+                 fg=C["faint"], bg=C["surface"]).pack(anchor="w")
+        self.radial_status_lbl = tk.Label(rin, text="—", font=F_UI_B, padx=14, pady=3,
+                                          fg=C["muted"], bg=C["sunken"])
+        self.radial_status_lbl.pack(anchor="w", pady=(8, 10))
+        self.radial_big_lbl = tk.Label(rin, text="—", font=F_MONO_XL,
+                                       fg=C["ink"], bg=C["surface"])
+        self.radial_big_lbl.pack(anchor="w")
+        tk.Label(rin, text="min air-gap (worst case)", font=F_SMALL,
+                 fg=C["faint"], bg=C["surface"]).pack(anchor="w", pady=(0, 10))
+        self.radial_detail_lbl = tk.Label(rin, text="", font=F_MONO,
+                                          fg=C["muted"], bg=C["surface"],
+                                          justify="left")
+        self.radial_detail_lbl.pack(anchor="w")
+        tk.Label(rin,
+                 text=("e per type (all diametral in → radial out):\n"
+                       " fitClearance → max_clear / 2\n"
+                       " coaxiality / runout → t / 2\n"
+                       " bearingClearance → value / 2  (ISO 5753 RIC)"),
+                 font=F_SMALL, fg=C["faint"], bg=C["surface"],
+                 justify="left").pack(anchor="w", pady=(14, 0))
 
     def _on_radial_dims_change(self, _evt=None):
         names = self._dim_name_map()
@@ -1251,8 +1832,8 @@ class ToleranceStudioPage(ttk.Frame):
         self._save()
         self.refresh_radial_tab()
 
-    def _on_radial_method_change(self):
-        self.model.radial.method = self.radial_method_var.get()
+    def _on_radial_method_change(self, _value=None):
+        self.model.radial.method = self.radial_method_seg.get()
         self._save()
         self.refresh_radial_tab()
 
@@ -1280,27 +1861,34 @@ class ToleranceStudioPage(ttk.Frame):
         return next((c for c in self.model.radial.contributors if c.id == sel[0]), None)
 
     def _on_radial_select(self, _evt=None):
-        c = self._selected_contributor()
-        if c is None:
-            return
-        self.contrib_label_entry.delete(0, tk.END)
-        self.contrib_label_entry.insert(0, c.label)
-        self.contrib_type_cb.set(c.type)
-        fit_map = self._fit_name_map()
-        id_to_disp = {v: k for k, v in fit_map.items()}
-        self.contrib_fit_cb["values"] = sorted(fit_map.keys())
-        self.contrib_fit_cb.set(id_to_disp.get(c.fit_id, ""))
-        self.contrib_value_entry.delete(0, tk.END)
-        self.contrib_value_entry.insert(0, _fmt(c.value))
-        is_fit = (c.type == "fitClearance")
-        self.contrib_fit_cb.configure(state=("readonly" if is_fit else "disabled"))
-        self.contrib_value_entry.configure(state=("disabled" if is_fit else "normal"))
+        self._loading_editor = True
+        try:
+            c = self._selected_contributor()
+            if c is None:
+                return
+            self.contrib_label_entry.delete(0, tk.END)
+            self.contrib_label_entry.insert(0, c.label)
+            self.contrib_type_cb.set(c.type)
+            fit_map = self._fit_name_map()
+            id_to_disp = {v: k for k, v in fit_map.items()}
+            self.contrib_fit_cb["values"] = sorted(fit_map.keys())
+            self.contrib_fit_cb.set(id_to_disp.get(c.fit_id, ""))
+            self.contrib_value_entry.configure(state="normal")
+            self.contrib_value_entry.delete(0, tk.END)
+            self.contrib_value_entry.insert(0, _fmt(c.value))
+            is_fit = (c.type == "fitClearance")
+            self.contrib_fit_cb.configure(state=("readonly" if is_fit else "disabled"))
+            self.contrib_value_entry.configure(state=("disabled" if is_fit else "normal"))
+        finally:
+            self._loading_editor = False
 
     def _on_contrib_type_change(self, _evt=None):
         self._on_contrib_form_commit()
         self._on_radial_select()
 
     def _on_contrib_form_commit(self, _evt=None):
+        if self._loading_editor:
+            return
         c = self._selected_contributor()
         if c is None:
             return
@@ -1325,7 +1913,7 @@ class ToleranceStudioPage(ttk.Frame):
         self.rotor_cb["values"] = sorted(names.keys())
         self.stator_cb.set(id_to_disp.get(self.model.radial.stator_id_dim_id, ""))
         self.rotor_cb.set(id_to_disp.get(self.model.radial.rotor_od_dim_id, ""))
-        self.radial_method_var.set(self.model.radial.method)
+        self.radial_method_seg.set(self.model.radial.method)
 
         dims = self.model.dims_by_id()
         fits = self.model.fits_by_id()
@@ -1338,7 +1926,8 @@ class ToleranceStudioPage(ttk.Frame):
         for c in self.model.radial.contributors:
             e = self.model.radial.contributor_e(c, dims, fits)
             fit_disp = fit_id_to_disp.get(c.fit_id, "—") if c.type == "fitClearance" else "—"
-            self.radial_tree.insert("", "end", iid=c.id, values=(c.label, c.type, fit_disp, _fmt(e)))
+            self.radial_tree.insert("", "end", iid=c.id,
+                                     values=(c.label, c.type, fit_disp, _fmt(e)))
         if sel:
             try:
                 self.radial_tree.selection_set(sel)
@@ -1346,39 +1935,73 @@ class ToleranceStudioPage(ttk.Frame):
                 pass
 
         if result is None:
-            self.g0_label.configure(text="g0 = —")
-            self.radial_result_label.configure(
-                text="Select a Stator ID and Rotor OD dimension above.")
+            self.g0_label.configure(text="g₀ = —")
+            self.radial_big_lbl.configure(text="—")
+            self.radial_status_lbl.configure(text="PICK DIMS", fg=C["muted"], bg=C["sunken"])
+            self.radial_detail_lbl.configure(
+                text="Select a Stator ID and Rotor OD\ndimension above to compute g₀.")
         else:
-            self.g0_label.configure(text=f"g0 = {_fmt(result['g0'])} mm")
-            self.radial_result_label.configure(text=(
-                f"E (WC)  = {_fmt(result['E_wc'])} mm\n"
-                f"E (RSS) = {_fmt(result['E_rss'])} mm\n"
-                f"Min air-gap (WC)  = {_fmt(result['min_airgap_wc'])} mm\n"
-                f"Min air-gap (RSS) = {_fmt(result['min_airgap_rss'])} mm\n"
-                f"Eccentricity ({self.model.radial.method}) = {_fmt(result['ecc_pct'], 1)} %"))
+            self.g0_label.configure(text=f"g₀ = {_fmt(result['g0'])} mm")
+            ok = min(result["min_airgap_wc"], result["min_airgap_rss"]) > 0
+            self.radial_status_lbl.configure(
+                text="OK — rotor clears" if ok else "RISK — rub possible",
+                fg=C["good"] if ok else C["bad"],
+                bg=C["good_soft"] if ok else C["bad_soft"])
+            self.radial_big_lbl.configure(
+                text=f"{_fmt(result['min_airgap_wc'])} mm",
+                fg=C["good"] if ok else C["bad"])
+            self.radial_detail_lbl.configure(text=(
+                f"min air-gap RSS  {_fmt(result['min_airgap_rss'])} mm\n"
+                f"E (WC)           {_fmt(result['E_wc'])} mm\n"
+                f"E (RSS)          {_fmt(result['E_rss'])} mm\n"
+                f"eccentricity     {_fmt(result['ecc_pct'], 1)} %  ({self.model.radial.method})"))
 
-    # ---- Summary tab ----
-    def _build_summary_tab(self):
-        top = ttk.Frame(self.summary_tab)
-        top.pack(fill="x", padx=8, pady=6)
-        ttk.Button(top, text="Export CSV", command=self._export_csv).pack(side="left", padx=2)
-        ttk.Button(top, text="Export JSON", command=self._export_json).pack(side="left", padx=2)
-        ttk.Button(top, text="Import JSON", command=self._import_json).pack(side="left", padx=2)
-        xlsx_btn = ttk.Button(top, text="Import .xlsx (dimensions)", command=self._import_xlsx)
-        xlsx_btn.pack(side="left", padx=2)
+    # ================================================================== #
+    #  Summary view                                                       #
+    # ================================================================== #
+    def _build_summary_view(self, parent):
+        card = _card(parent)
+        card.pack(fill="both", expand=True)
+
+        # Save/Load Project live in the header (visible from every tab, not
+        # just this one) -- this bar keeps only the two actions specific to
+        # Summary: a flat CSV export of the table above, and the .xlsx
+        # bootstrap import that seeds Dimensions from an external sheet.
+        bar = WrapBar(card)
+        bar.pack(fill="x")
+        bar.add(lambda p: _btn(p, "Export CSV", self._export_csv), padx=(10, 4), pady=8)
+        xlsx_btn = bar.add(lambda p: _btn(p, "Import .xlsx (dimensions)", self._import_xlsx),
+                            padx=4, pady=8)
         if not HAVE_OPENPYXL:
-            xlsx_btn.configure(state="disabled")
-            ttk.Label(top, text="(openpyxl not installed)",
-                      foreground="#a05a00").pack(side="left", padx=6)
+            xlsx_btn.configure(state="disabled", cursor="arrow")
+            bar.add(lambda p: tk.Label(p, text="openpyxl not installed", font=F_SMALL,
+                                       fg=C["warn"], bg=C["sunken"]), padx=6, pady=8)
 
-        self.summary_tree = ttk.Treeview(self.summary_tab, columns=("kind", "name", "status", "detail"),
-                                          show="headings", style="Mono.Treeview")
-        for cid, text, w in (("kind", "Kind", 80), ("name", "Name", 210),
-                             ("status", "Status", 100), ("detail", "Detail", 320)):
+        wrap = tk.Frame(card, bg=C["surface"])
+        wrap.pack(fill="both", expand=True, padx=1, pady=1)
+        self.summary_tree = ttk.Treeview(
+            wrap, columns=("kind", "name", "status", "detail"),
+            show="headings", style="Tol.Treeview")
+        for cid, text, w, anchor in (
+                ("kind", "KIND", 90, "w"), ("name", "NAME", 230, "w"),
+                ("status", "STATUS", 120, "center"), ("detail", "DETAIL", 420, "w")):
             self.summary_tree.heading(cid, text=text)
-            self.summary_tree.column(cid, width=w, anchor="w")
-        self.summary_tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+            self.summary_tree.column(cid, width=w, anchor=anchor)
+        self.summary_tree.tag_configure("ok", background=C["good_soft"])
+        self.summary_tree.tag_configure("bad", background=C["bad_soft"])
+        self.summary_tree.tag_configure("warn", background=C["warn_soft"])
+        self.summary_tree.tag_configure("info", background=C["info_soft"])
+        self.summary_tree.tag_configure("plain", background=C["surface"])
+        svs = ttk.Scrollbar(wrap, orient="vertical", command=self.summary_tree.yview)
+        self.summary_tree.configure(yscrollcommand=svs.set)
+        self.summary_tree.pack(side="left", fill="both", expand=True)
+        svs.pack(side="right", fill="y")
+
+    @staticmethod
+    def _summary_tag(status):
+        return {"PASS": "ok", "OK": "ok", "Clearance": "ok",
+                "FAIL": "bad", "RISK": "bad", "Interference": "warn",
+                "Transition": "info"}.get(status, "plain")
 
     def refresh_summary_tab(self):
         for iid in self.summary_tree.get_children():
@@ -1390,12 +2013,15 @@ class ToleranceStudioPage(ttk.Frame):
             cls = f.classification(dims)
             mn, mx = f.min_clear(dims), f.max_clear(dims)
             self.summary_tree.insert("", "end", iid=f"fit::{f.id}",
-                                      values=("Fit", f.name, cls, f"min={_fmt(mn)}  max={_fmt(mx)}"))
+                                      tags=(self._summary_tag(cls),),
+                                      values=("Fit", f.name, cls,
+                                              f"min={_fmt(mn)}  max={_fmt(mx)}"))
 
         for s in self.model.stacks:
             res = s.compute(dims)
             status = "—" if res["pass"] is None else ("PASS" if res["pass"] else "FAIL")
             self.summary_tree.insert("", "end", iid=f"stack::{s.id}",
+                                      tags=(self._summary_tag(status),),
                                       values=("Stack", s.name, status,
                                               f"[{_fmt(res['min'])}, {_fmt(res['max'])}] mm ({s.method})"))
 
@@ -1403,6 +2029,7 @@ class ToleranceStudioPage(ttk.Frame):
         if rres is not None:
             status = "OK" if min(rres["min_airgap_wc"], rres["min_airgap_rss"]) > 0 else "RISK"
             self.summary_tree.insert("", "end", iid="radial",
+                                      tags=(self._summary_tag(status),),
                                       values=("Radial", "Air-gap", status,
                                               f"g0={_fmt(rres['g0'])}  min(WC)={_fmt(rres['min_airgap_wc'])}  "
                                               f"ecc={_fmt(rres['ecc_pct'], 1)}%"))
@@ -1422,20 +2049,30 @@ class ToleranceStudioPage(ttk.Frame):
         except Exception as exc:
             messagebox.showerror("Export CSV", str(exc))
 
-    def _export_json(self):
-        path = filedialog.asksaveasfilename(defaultextension=".json",
-                                             filetypes=[("JSON", "*.json")])
+    def _save_project_as(self):
+        """Save the current model to a file of your choice, and make that
+        file the target of every future autosave (standard "Save As"
+        behavior -- the same JSON shape as the silent per-edit save to
+        data_path, just user-named and user-located)."""
+        path = filedialog.asksaveasfilename(
+            title="Save Tolerance Project As", defaultextension=".json",
+            filetypes=[("Tolerance Studio Project", "*.json"), ("All files", "*.*")])
         if not path:
             return
+        self.data_path = path
         try:
-            with open(path, "w", encoding="utf-8") as fh:
-                json.dump(self.model.to_dict(), fh, indent=2)
-            messagebox.showinfo("Export JSON", f"Saved to {path}")
+            self._save()
+            messagebox.showinfo("Save Project", f"Saved project to:\n{path}")
         except Exception as exc:
-            messagebox.showerror("Export JSON", str(exc))
+            messagebox.showerror("Save Project", str(exc))
 
-    def _import_json(self):
-        path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
+    def _load_project(self):
+        """Replace the current model with one loaded from a file you pick;
+        that file becomes the new autosave target, same as opening a
+        project in any other app."""
+        path = filedialog.askopenfilename(
+            title="Load Tolerance Project",
+            filetypes=[("Tolerance Studio Project", "*.json"), ("All files", "*.*")])
         if not path:
             return
         try:
@@ -1443,14 +2080,12 @@ class ToleranceStudioPage(ttk.Frame):
                 data = json.load(fh)
             self.model = Model.from_dict(data)
             self.active_stack_id = self.model.stacks[0].id if self.model.stacks else None
-            self._fit_widgets = {}
-            for child in list(self.fits_scroll.inner.winfo_children()):
-                child.destroy()
+            self.data_path = path
             self._save()
             self.refresh_all()
-            messagebox.showinfo("Import JSON", f"Loaded {path}")
+            messagebox.showinfo("Load Project", f"Loaded project from:\n{path}")
         except Exception as exc:
-            messagebox.showerror("Import JSON", str(exc))
+            messagebox.showerror("Load Project", str(exc))
 
     def _import_xlsx(self):
         if not HAVE_OPENPYXL:
@@ -1508,6 +2143,7 @@ class ToleranceStudioPage(ttk.Frame):
         self.refresh_stack_tab()
         self.refresh_radial_tab()
         self.refresh_summary_tab()
+        self._update_chips()
 
 
 # --------------------------------------------------------------------------- #
@@ -1517,6 +2153,7 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.title("Tolerance Studio -- standalone demo")
     root.geometry("1280x820")
+    root.configure(bg=C["bg"])
     nb = ttk.Notebook(root)
     nb.pack(fill="both", expand=True)
     page = ToleranceStudioPage(nb, data_path="tolerance_studio.json")
