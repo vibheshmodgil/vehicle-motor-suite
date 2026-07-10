@@ -19,6 +19,15 @@ UI notes (2026-07 redesign):
     ttk.Notebook) so the active view is visually obvious and stylable.
   * Fits and Radial use master-detail layouts (table + editor panel);
     Axial pairs the chain editor with a live result card + waterfall chart.
+  * Motion: all animation runs through ToleranceStudioPage._animate (one
+    cancellable after() ticker per key, cubic ease-out; finalize always
+    lands the exact end state). Module flag ANIMATIONS=False -- or an
+    unmapped page, e.g. headless tests -- degrades every effect to an
+    instant jump, so end states are identical with or without motion.
+    Effects: sliding nav underline + view glide on tab switch, count-up
+    on the big result numbers, bg pulse on status badges/chips when their
+    state CHANGES, waterfall bars growing from their cumulative anchors,
+    button hover fades, and the "saved" note flashing green then fading.
 """
 
 from __future__ import annotations
@@ -28,6 +37,7 @@ import dataclasses
 import json
 import math
 import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -92,6 +102,36 @@ CLS_COLORS = {
     "Invalid":      (C["faint"], C["sunken"]),
 }
 BADGE_COLORS = {k: v[0] for k, v in CLS_COLORS.items()}  # back-compat
+
+# --------------------------------------------------------------------------- #
+#  Motion (all animation flows through ToleranceStudioPage._animate)          #
+# --------------------------------------------------------------------------- #
+# Master kill switch. When False -- or whenever the page is not actually on
+# screen (winfo_ismapped() is false, e.g. under headless tests) -- every
+# animation jumps straight to its final frame, so end states are identical
+# with or without motion.
+ANIMATIONS = True
+_ANIM_FRAME_MS = 16  # ~60 fps
+
+
+def _hex_to_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _blend(a, b, t):
+    """Linear blend between two '#rrggbb' colors, t in [0, 1]."""
+    t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+    ra, ga, ba = _hex_to_rgb(a)
+    rb, gb, bb = _hex_to_rgb(b)
+    return "#%02x%02x%02x" % (round(ra + (rb - ra) * t),
+                              round(ga + (gb - ga) * t),
+                              round(ba + (bb - ba) * t))
+
+
+def _ease_out(t):
+    """Cubic ease-out: fast start, gentle settle."""
+    return 1.0 - (1.0 - t) ** 3
 
 
 # --------------------------------------------------------------------------- #
@@ -699,8 +739,35 @@ def _btn(parent, text, command, kind="ghost", padx=13, pady=5):
                   activebackground=spec["hover"],
                   activeforeground=spec["fg"] if kind != "primary" else "white",
                   highlightthickness=1, highlightbackground=spec["border"])
-    b.bind("<Enter>", lambda e: b.configure(bg=spec["hover"]))
-    b.bind("<Leave>", lambda e: b.configure(bg=spec["bg"]))
+    def _fade_to(target):
+        """Short bg fade on hover in/out (self-contained: uses the button's
+        own after loop, so it needs no page-level machinery)."""
+        prev = getattr(b, "_hover_job", None)
+        if prev is not None:
+            try:
+                b.after_cancel(prev)
+            except Exception:
+                pass
+            b._hover_job = None
+        if not ANIMATIONS:
+            b.configure(bg=target)
+            return
+        start = b.cget("bg")
+        steps = 5
+
+        def step(i=1):
+            if not b.winfo_exists():
+                return
+            b.configure(bg=_blend(start, target, i / steps))
+            if i < steps:
+                b._hover_job = b.after(_ANIM_FRAME_MS, step, i + 1)
+            else:
+                b._hover_job = None
+
+        step()
+
+    b.bind("<Enter>", lambda e: _fade_to(spec["hover"]))
+    b.bind("<Leave>", lambda e: _fade_to(spec["bg"]))
     return b
 
 
@@ -726,6 +793,12 @@ class ToleranceStudioPage(ttk.Frame):
         self.model = self._load_or_seed()
         self.active_stack_id = self.model.stacks[0].id if self.model.stacks else None
         self._loading_editor = False  # reentrancy guard for detail editors
+
+        # animation bookkeeping (see _animate) -- must exist before any
+        # refresh/_save can run, since those route through animated setters
+        self._anim_jobs: Dict[str, dict] = {}   # key -> {"id": after-id, "finalize": fn}
+        self._anim_num: Dict[str, Optional[float]] = {}   # last value per numeric label
+        self._anim_state: Dict[str, tuple] = {}  # last (text, fg, bg) per status label
 
         self._init_styles()
         self._build_ui()
@@ -777,15 +850,145 @@ class ToleranceStudioPage(ttk.Frame):
             if hasattr(self, "saved_lbl") and self.saved_lbl.winfo_exists():
                 if note is None:
                     import datetime
-                    note, color = (f"✓ saved {datetime.datetime.now():%H:%M:%S}",
-                                   C["faint"])
-                self.saved_lbl.configure(text=note, fg=color)
+                    note = f"✓ saved {datetime.datetime.now():%H:%M:%S}"
+                    # flash green, then fade to the resting faint gray
+                    self.saved_lbl.configure(text=note, fg=C["good"])
+                    self._animate(
+                        "saved", 1200,
+                        lambda k: self.saved_lbl.configure(
+                            fg=_blend(C["good"], C["faint"], k)),
+                        finalize=lambda: self.saved_lbl.configure(fg=C["faint"]))
+                else:
+                    self.saved_lbl.configure(text=note, fg=color)
         except Exception:
             pass
 
     def _on_destroy(self, event):
         if event.widget is self:
+            for key in list(self._anim_jobs):
+                job = self._anim_jobs.pop(key, None)
+                if job and job.get("id") is not None:
+                    try:
+                        self.after_cancel(job["id"])
+                    except Exception:
+                        pass
             self._save()
+
+    # ------------------------------------------------------------------ #
+    #  Animation engine                                                   #
+    # ------------------------------------------------------------------ #
+    # One shared after()-driven ticker per animation KEY. Starting a new
+    # animation on a key cancels the old one, and cancellation always runs
+    # the old animation's finalize() first -- so every animation is
+    # guaranteed to land on its final state exactly once, whether it plays
+    # out, is superseded, or the page is being torn down. When ANIMATIONS
+    # is off or the page isn't mapped (headless tests), _animate degrades
+    # to "apply final frame immediately".
+
+    def _anims_on(self) -> bool:
+        try:
+            return ANIMATIONS and bool(self.winfo_ismapped())
+        except Exception:
+            return False
+
+    def _animate(self, key, duration_ms, on_frame, finalize=None,
+                 frame_ms=_ANIM_FRAME_MS):
+        """on_frame(k) with k eased 0->1; finalize() once at the end.
+        frame_ms: tick interval -- pass a larger value for expensive frames
+        (e.g. a full matplotlib redraw) so ticks don't saturate the event
+        queue and starve user input."""
+        self._cancel_anim(key)
+        if not self._anims_on():
+            try:
+                on_frame(1.0)
+            finally:
+                if finalize:
+                    finalize()
+            return
+        start = time.perf_counter()
+        job = {"id": None, "finalize": finalize}
+        self._anim_jobs[key] = job
+
+        def tick():
+            if not self.winfo_exists():
+                return
+            t = (time.perf_counter() - start) * 1000.0 / duration_ms
+            done = t >= 1.0
+            try:
+                on_frame(_ease_out(min(t, 1.0)))
+            except tk.TclError:
+                done = True
+            if done:
+                # pop first so finalize can't be re-run by a cancel
+                if self._anim_jobs.get(key) is job:
+                    self._anim_jobs.pop(key, None)
+                if finalize:
+                    try:
+                        finalize()
+                    except tk.TclError:
+                        pass
+            else:
+                job["id"] = self.after(frame_ms, tick)
+
+        tick()
+
+    def _cancel_anim(self, key):
+        job = self._anim_jobs.pop(key, None)
+        if job is None:
+            return
+        if job.get("id") is not None:
+            try:
+                self.after_cancel(job["id"])
+            except Exception:
+                pass
+        if job.get("finalize"):
+            try:
+                job["finalize"]()
+            except Exception:
+                pass
+
+    def _set_number_animated(self, key, label, value, fmt_fn):
+        """Count a numeric label from its previous value to `value`.
+        value=None -> em-dash, no animation. First-ever value -> no
+        animation (nothing to count from)."""
+        old = self._anim_num.get(key)
+        self._anim_num[key] = value
+        akey = "num:" + key
+        if value is None:
+            self._cancel_anim(akey)
+            label.configure(text="—")
+            return
+        if old is None or abs(value - old) < 1e-12:
+            self._cancel_anim(akey)
+            label.configure(text=fmt_fn(value))
+            return
+
+        def frame(k):
+            label.configure(text=fmt_fn(old + (value - old) * k))
+
+        self._animate(akey, 320, frame,
+                      finalize=lambda: label.configure(text=fmt_fn(value)))
+
+    def _set_status_animated(self, key, label, text, fg, bg):
+        """Set a status badge/chip; if its state actually CHANGED, pulse the
+        background from a strong tint of the new status color down to its
+        soft resting color, so a PASS->FAIL flip catches the eye."""
+        new = (text, fg, bg)
+        prev = self._anim_state.get(key)
+        self._anim_state[key] = new
+        label.configure(text=text, fg=fg)
+        akey = "st:" + key
+        if prev is None or prev == new:
+            self._cancel_anim(akey)
+            label.configure(bg=bg)
+            return
+        hot = _blend(fg, bg, 0.45)
+
+        def frame(k):
+            label.configure(bg=_blend(hot, bg, k))
+
+        self._animate(akey, 500, frame,
+                      finalize=lambda: label.configure(bg=bg))
 
     # ------------------------------------------------------------------ #
     #  Name<->id maps (dedupe display names when two items share a name)  #
@@ -890,34 +1093,41 @@ class ToleranceStudioPage(ttk.Frame):
         n_invalid = sum(1 for f in self.model.fits
                         if f.classification(dims) == "Invalid")
         if n_invalid:
-            self.chip_fits.configure(text=f"Fits {len(self.model.fits)} · {n_invalid} invalid",
-                                     fg=C["warn"], bg=C["warn_soft"])
+            self._set_status_animated(
+                "chip_fits", self.chip_fits,
+                f"Fits {len(self.model.fits)} · {n_invalid} invalid",
+                C["warn"], C["warn_soft"])
         else:
-            self.chip_fits.configure(text=f"Fits {len(self.model.fits)}",
-                                     fg=C["muted"], bg=C["sunken"])
+            self._set_status_animated("chip_fits", self.chip_fits,
+                                      f"Fits {len(self.model.fits)}",
+                                      C["muted"], C["sunken"])
 
         judged = [s.compute(dims)["pass"] for s in self.model.stacks]
         judged = [p for p in judged if p is not None]
         if judged:
             n_pass = sum(1 for p in judged if p)
             ok = n_pass == len(judged)
-            self.chip_stacks.configure(
-                text=f"Stacks {n_pass}/{len(judged)} pass",
-                fg=C["good"] if ok else C["bad"],
-                bg=C["good_soft"] if ok else C["bad_soft"])
+            self._set_status_animated(
+                "chip_stacks", self.chip_stacks,
+                f"Stacks {n_pass}/{len(judged)} pass",
+                C["good"] if ok else C["bad"],
+                C["good_soft"] if ok else C["bad_soft"])
         else:
-            self.chip_stacks.configure(text=f"Stacks {len(self.model.stacks)}",
-                                       fg=C["muted"], bg=C["sunken"])
+            self._set_status_animated("chip_stacks", self.chip_stacks,
+                                      f"Stacks {len(self.model.stacks)}",
+                                      C["muted"], C["sunken"])
 
         r = self.model.radial.compute(dims, fits)
         if r is None:
-            self.chip_gap.configure(text="Air-gap —", fg=C["muted"], bg=C["sunken"])
+            self._set_status_animated("chip_gap", self.chip_gap,
+                                      "Air-gap —", C["muted"], C["sunken"])
         else:
             ok = min(r["min_airgap_wc"], r["min_airgap_rss"]) > 0
-            self.chip_gap.configure(
-                text=f"Air-gap {'OK' if ok else 'RISK'}",
-                fg=C["good"] if ok else C["bad"],
-                bg=C["good_soft"] if ok else C["bad_soft"])
+            self._set_status_animated(
+                "chip_gap", self.chip_gap,
+                f"Air-gap {'OK' if ok else 'RISK'}",
+                C["good"] if ok else C["bad"],
+                C["good_soft"] if ok else C["bad_soft"])
 
     # ---- nav ----
     _NAV = [("dims", "Dimensions"), ("fits", "Fits"),
@@ -926,14 +1136,73 @@ class ToleranceStudioPage(ttk.Frame):
 
     def _build_nav(self, parent):
         bar = tk.Frame(parent, bg=C["bg"])
-        bar.pack(fill="x", padx=14, pady=10)
+        bar.pack(fill="x", padx=14, pady=(10, 8))
+        self._nav_bar = bar
         self._nav_btns = {}
         for key, label in self._NAV:
             b = tk.Button(bar, text=label, font=F_UI_B, relief="flat", bd=0,
                           padx=16, pady=6, cursor="hand2",
                           command=lambda k=key: self._select_view(k))
-            b.pack(side="left", padx=(0, 6))
+            # bottom gap reserves a lane for the sliding accent underline
+            b.pack(side="left", padx=(0, 6), pady=(0, 5))
             self._nav_btns[key] = b
+        self._nav_indicator = tk.Frame(bar, bg=C["accent"], height=3)
+
+    def _move_nav_indicator(self, key, animate=True):
+        """Slide the accent underline beneath the active nav tab."""
+        b = self._nav_btns[key]
+        try:
+            self.update_idletasks()
+        except Exception:
+            return
+        tx, tw, th = b.winfo_x(), b.winfo_width(), b.winfo_height()
+        if tw <= 1:  # geometry not computed yet (first call during build)
+            self.after(60, lambda: self._move_nav_indicator(key, animate=False))
+            return
+        y = th + 1  # sits in the 5px lane below the buttons
+        cx, cw = self._nav_indicator.winfo_x(), self._nav_indicator.winfo_width()
+        if not animate or cw <= 1 or not self._anims_on():
+            self._cancel_anim("nav")
+            self._nav_indicator.place(x=tx, y=y, width=tw, height=3)
+            return
+
+        def frame(k):
+            self._nav_indicator.place(x=round(cx + (tx - cx) * k), y=y,
+                                      width=round(cw + (tw - cw) * k), height=3)
+
+        self._animate("nav", 220, frame,
+                      finalize=lambda: self._nav_indicator.place(
+                          x=tx, y=y, width=tw, height=3))
+
+    def _slide_in_view(self, view):
+        """Raise `view` with a short horizontal glide. The view is briefly
+        moved from grid to place management (grid_remove keeps its options,
+        so plain grid() restores it exactly); finalize ALWAYS re-grids, and
+        _animate guarantees finalize runs even when a rapid tab-hopping
+        click supersedes this slide mid-flight."""
+        holder = view.master
+        if not self._anims_on() or holder.winfo_width() <= 1:
+            self._cancel_anim("view")  # re-grids any view still mid-slide
+            view.tkraise()
+            return
+        dist = 26
+        self._cancel_anim("view")
+        view.grid_remove()
+        view.place(x=dist, y=0, relwidth=1.0, relheight=1.0)
+        view.tkraise()
+
+        def frame(k):
+            view.place_configure(x=round(dist * (1.0 - k)))
+
+        def fin():
+            try:
+                view.place_forget()
+                view.grid()
+                view.tkraise()
+            except tk.TclError:
+                pass
+
+        self._animate("view", 200, frame, finalize=fin)
 
     def _select_view(self, key):
         self._active_view = key
@@ -946,7 +1215,8 @@ class ToleranceStudioPage(ttk.Frame):
                 b.configure(bg=C["surface"], fg=C["muted"],
                             activebackground=C["sunken"],
                             activeforeground=C["ink"])
-        self.views[key].tkraise()
+        self._move_nav_indicator(key)
+        self._slide_in_view(self.views[key])
 
     # ================================================================== #
     #  Dimensions view                                                    #
@@ -1585,9 +1855,10 @@ class ToleranceStudioPage(ttk.Frame):
         dims = self.model.dims_by_id()
 
         if stack is None:
-            self.stack_nom_lbl.configure(text="—")
+            self._set_number_animated("stack_nom", self.stack_nom_lbl, None, _fmt)
             self.stack_range_lbl.configure(text="No stack — click “＋ Add”.")
-            self.stack_pass_lbl.configure(text="—", fg=C["muted"], bg=C["sunken"])
+            self._set_status_animated("stack_pass", self.stack_pass_lbl,
+                                      "—", C["muted"], C["sunken"])
             self.target_min_entry.delete(0, tk.END)
             self.target_max_entry.delete(0, tk.END)
             self._draw_chain()
@@ -1612,18 +1883,22 @@ class ToleranceStudioPage(ttk.Frame):
             self.target_max_entry.insert(0, _fmt(stack.target_max))
 
         res = stack.compute(dims)
-        self.stack_nom_lbl.configure(text=f"{_fmt(res['nominal'])} mm")
+        self._set_number_animated("stack_nom", self.stack_nom_lbl,
+                                  res["nominal"], lambda v: f"{_fmt(v)} mm")
         note = (f"   ⚠ {res['invalid_links']} missing link(s)"
                 if res["invalid_links"] else "")
         self.stack_range_lbl.configure(
             text=f"range [{_fmt(res['min'])}, {_fmt(res['max'])}]  ({stack.method}){note}")
         pf = res["pass"]
         if pf is None:
-            self.stack_pass_lbl.configure(text="NO TARGET", fg=C["muted"], bg=C["sunken"])
+            self._set_status_animated("stack_pass", self.stack_pass_lbl,
+                                      "NO TARGET", C["muted"], C["sunken"])
         elif pf:
-            self.stack_pass_lbl.configure(text="PASS", fg=C["good"], bg=C["good_soft"])
+            self._set_status_animated("stack_pass", self.stack_pass_lbl,
+                                      "PASS", C["good"], C["good_soft"])
         else:
-            self.stack_pass_lbl.configure(text="FAIL", fg=C["bad"], bg=C["bad_soft"])
+            self._set_status_animated("stack_pass", self.stack_pass_lbl,
+                                      "FAIL", C["bad"], C["bad_soft"])
 
         self._draw_chain()
 
@@ -1649,18 +1924,21 @@ class ToleranceStudioPage(ttk.Frame):
                     fontsize=9, color=C["faint"])
             ax.set_xticks([])
             ax.set_yticks([])
+            self._cancel_anim("chain")
             self.chain_canvas.draw_idle()
             return
 
         # Horizontal waterfall: one row per link, running cumulative total.
         cum = 0.0
         labels = []
+        bar_info = []  # (rectangle patch, cumulative start, signed delta)
         for i, (link, d) in enumerate(rows):
             delta = link.sense * d.nominal
             left = min(cum, cum + delta)
             color = C["good"] if link.sense > 0 else C["warn"]
-            ax.barh(i, abs(delta), left=left, height=0.55, color=color,
-                    edgecolor="white", linewidth=0.5, zorder=3)
+            bc = ax.barh(i, abs(delta), left=left, height=0.55, color=color,
+                         edgecolor="white", linewidth=0.5, zorder=3)
+            bar_info.append((bc.patches[0], cum, delta))
             new_cum = cum + delta
             # thin connector down to the next row
             if i < len(rows) - 1:
@@ -1687,7 +1965,27 @@ class ToleranceStudioPage(ttk.Frame):
             self.chain_fig.tight_layout()
         except Exception:
             pass
-        self.chain_canvas.draw_idle()
+
+        # Grow the bars out of their cumulative anchors. Axes limits, grid,
+        # connectors and the total line are all drawn at final positions
+        # already (only the bar rectangles animate), so nothing rescales
+        # mid-flight. finalize snaps every bar to its exact final geometry.
+        def _bars_at(k):
+            for patch, c0, delta in bar_info:
+                w = abs(delta) * k
+                patch.set_width(w)
+                patch.set_x(c0 if delta >= 0 else c0 - w)
+            self.chain_canvas.draw_idle()
+
+        if self._anims_on():
+            # 33ms ticks: each frame is a full matplotlib redraw (~30-40ms),
+            # so a 16ms tick would saturate the Tk event queue for the whole
+            # animation and make the UI feel busy.
+            self._animate("chain", 420, _bars_at,
+                          finalize=lambda: _bars_at(1.0), frame_ms=33)
+        else:
+            self._cancel_anim("chain")
+            self.chain_canvas.draw_idle()
 
     # ================================================================== #
     #  Radial air-gap view                                                #
@@ -1936,20 +2234,23 @@ class ToleranceStudioPage(ttk.Frame):
 
         if result is None:
             self.g0_label.configure(text="g₀ = —")
-            self.radial_big_lbl.configure(text="—")
-            self.radial_status_lbl.configure(text="PICK DIMS", fg=C["muted"], bg=C["sunken"])
+            self._set_number_animated("radial_gap", self.radial_big_lbl, None, _fmt)
+            self._set_status_animated("radial_status", self.radial_status_lbl,
+                                      "PICK DIMS", C["muted"], C["sunken"])
             self.radial_detail_lbl.configure(
                 text="Select a Stator ID and Rotor OD\ndimension above to compute g₀.")
         else:
             self.g0_label.configure(text=f"g₀ = {_fmt(result['g0'])} mm")
             ok = min(result["min_airgap_wc"], result["min_airgap_rss"]) > 0
-            self.radial_status_lbl.configure(
-                text="OK — rotor clears" if ok else "RISK — rub possible",
-                fg=C["good"] if ok else C["bad"],
-                bg=C["good_soft"] if ok else C["bad_soft"])
-            self.radial_big_lbl.configure(
-                text=f"{_fmt(result['min_airgap_wc'])} mm",
-                fg=C["good"] if ok else C["bad"])
+            self._set_status_animated(
+                "radial_status", self.radial_status_lbl,
+                "OK — rotor clears" if ok else "RISK — rub possible",
+                C["good"] if ok else C["bad"],
+                C["good_soft"] if ok else C["bad_soft"])
+            self.radial_big_lbl.configure(fg=C["good"] if ok else C["bad"])
+            self._set_number_animated("radial_gap", self.radial_big_lbl,
+                                      result["min_airgap_wc"],
+                                      lambda v: f"{_fmt(v)} mm")
             self.radial_detail_lbl.configure(text=(
                 f"min air-gap RSS  {_fmt(result['min_airgap_rss'])} mm\n"
                 f"E (WC)           {_fmt(result['E_wc'])} mm\n"
