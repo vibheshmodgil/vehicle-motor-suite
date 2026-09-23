@@ -39,7 +39,8 @@ python -m vmi         # equivalent (vmi/__main__.py)
 
 There is **no build step**. It is a plain Python GUI app. There IS now a small
 test suite: `python -m pytest tests/` runs golden-value regression tests over
-`physics.py`, `calc_ext.py`, `units.py`, `formatting.py`, and `validation.py`.
+`physics.py`, `calc_ext.py` (including the acceleration simulation),
+`units.py`, `formatting.py`, and `validation.py`.
 **These tests lock the calibrated numbers** — a failure means a formula
 changed, which must only happen on an explicit request. GUI behavior still
 needs manual verification by running the app.
@@ -241,7 +242,7 @@ vmi/app.py
 | `ui_helpers.py` | `HelpersMixin` | `create_section`, `create_labeled_entry`, header, menu bar, axis-clearing, all the `on_*_manual_edit` flag setters, tyre→radius. |
 | `limits.py` | `LimitsMixin` | All axis-limit logic (`get_x_limits`, `get_y_limits`, force variants, compare-std limits). |
 | `dispatch.py` | `DispatchMixin` | **The router.** `plot_graph()` reads inputs and dispatches to the right plot method by `self.plot_mode`; `show_sections_for_analysis()` shows/hides input sections; `update_plot()`. |
-| `torque_force.py` | `TorqueForceMixin` | `plot_torque_graph`, `plot_force_graph`, `plot_vehicle_max_speed_vs_time`, intersection annotation. |
+| `torque_force.py` | `TorqueForceMixin` | `plot_torque_graph`, `plot_force_graph`, `plot_vehicle_max_speed_vs_time`, intersection annotation, the shared `_accel_*` acceleration-simulation helpers (see §6). |
 | `parametric.py` | `ParametricMixin` | Parametric sweeps + the estimators (top speed, accel time, gradability). |
 | `drive_cycle.py` | `DriveCycleMixin` | Drive-cycle plotting, torque-speed-over-cycle scatter/heatmap, cycle property stats. |
 | `engine.py` | `EngineMixin` | IC-engine multi-gear analysis, gear-efficiency interpolation, sync engine curve into motor inputs. |
@@ -463,6 +464,41 @@ app — treat writes carefully.
   (θ = arctan(pct/100)). `fmt_gradient(pct)` renders a legend label back in
   the entered unit. Pure conversions `gradient_deg_to_pct`/`_pct_to_deg`
   live in `units.py`, locked in `tests/test_battery_eff_cap.py`.
+- **Acceleration simulation: the speed grid is the VEHICLE's, not the plot's
+  (2026-09 bug fix, explicit user request).** `plot_vehicle_max_speed_vs_time`
+  used to integrate over the `speeds` array `dispatch.plot_graph` builds from
+  the **torque plot's** x-axis limit (auto-filled to `0,80` km/h) and `break`
+  out of the loop as soon as the speed reached the end of it. Any vehicle able
+  to exceed that x-limit therefore stopped mid-run — reported with CdA 0.5,
+  Crr 0.022, 90/90 tyre, where a 180 Nm / 4.4 kW motor tops out at 81.2 km/h
+  and so quit at 30.8 s of a 60 s simulation — and the green "Final:" marker
+  then read `80.0 km/h`, a plot-axis number presented as a physical top speed.
+  Now:
+  - `calc_ext.simulate_acceleration()` (pure, golden-locked in
+    `tests/test_acceleration.py`) **always integrates the full Max Simulation
+    Time**; past the top speed the net force is simply ≤ 0, so the curve
+    asymptotes instead of being truncated. It reports `launched`,
+    `top_speed_kmh` and `settled_at_s` (accel < 0.01 m/s²) in its `info` dict.
+  - `calc_ext.top_speed_from_net_force()` interpolates the first
+    positive→negative net-force crossing, same rule as
+    `ParametricMixin._estimate_top_speed`.
+  - `TorqueForceMixin._accel_net_force_grid()` **grows** the speed grid
+    (doubling from the passed hint, guard-capped at 600 km/h) until that
+    crossing is bracketed, so the grid always covers the real top speed.
+  - `_accel_wheel_force_fn()` / `_accel_resistive_force()` / `_accel_simulate()`
+    are shared with **Compare Standard Motor Data**, whose per-motor loop had
+    the identical `break` bug copy-pasted; both call sites now go through them
+    and cannot drift.
+  - The force lookup is now `np.interp` rather than nearest-neighbour
+    `argmin`; on the 6000-point grid that moves already-working results by
+    ~1e-4 km/h and leaves 0-60 times identical to the millisecond (locked by
+    `TestCompletedCasesKeepTheirNumbers`).
+  - Reporting: the curve is plotted **once** (it used to be drawn twice, giving
+    two legend entries); the final marker distinguishes "Top speed X (reached
+    ~Ys)" from "At Ys: X km/h (top speed Z)"; a missed target explains whether
+    it is above the top speed or just out of time; "can't move from rest" is
+    called out explicitly; and the blocking `messagebox.showerror` is replaced
+    by `set_status` + an in-plot note, which also unblocks report generation.
 - **Thermal load points (2026-07).** Section key `thermal` (shown in
   Powertrain Sizing + Drive Cycle Efficiency): a switch
   (`thermal_overlay_switch`), a speed-unit combo

@@ -14,7 +14,8 @@ from scipy.ndimage import gaussian_filter
 
 from .theme import COLORS, FONTS
 from .physics import calculate_crr_cd_a, df, g
-from .calc_ext import cap_torque_to_power
+from .calc_ext import (cap_torque_to_power, simulate_acceleration,
+                       top_speed_from_net_force)
 
 
 
@@ -590,8 +591,108 @@ class TorqueForceMixin:
         self.canvas.draw()
         
 
+    # ---------------------------------------------------------------------
+    # Acceleration simulation helpers
+    # ---------------------------------------------------------------------
+    # Shared by the Acceleration view and Compare Standard Motor Data, so the
+    # two can't drift apart. The important property: the speed grid these build
+    # is derived from the VEHICLE (grown until the net tractive force actually
+    # crosses zero), never from the torque plot's x-axis limit -- see the note
+    # on calc_ext.simulate_acceleration for what that used to break.
+    def _accel_wheel_force_fn(self, wheel_radius, gear_ratio, gear_eff,
+                              peak_torque=None, peak_power_kw=None,
+                              motor_curve=None):
+        """Callable speeds_kmh -> max available wheel force (N).
+
+        `motor_curve` is an (speed_rpm, torque_Nm) pair (an uploaded or saved
+        motor curve, held flat outside its own range exactly as the torque
+        views do); without one the theoretical peak-torque / peak-power
+        envelope is used. The optional battery DC limit is applied to the motor
+        torque in both cases, same as every other capability curve.
+        """
+        wheel_radius = float(wheel_radius)
+        gear_ratio = float(gear_ratio)
+        gear_eff = float(gear_eff)
+
+        def wheel_force(speeds_kmh):
+            speeds_kmh = np.asarray(speeds_kmh, dtype=float)
+            speeds_mps = speeds_kmh / 3.6
+            rpm_wheel = (speeds_mps / wheel_radius) * 60 / (2 * np.pi)
+            rpm_motor = rpm_wheel * gear_ratio
+            if motor_curve is not None:
+                curve_rpm = np.asarray(motor_curve[0], dtype=float)
+                curve_torque = np.asarray(motor_curve[1], dtype=float)
+                order = np.argsort(curve_rpm)
+                curve_rpm, curve_torque = curve_rpm[order], curve_torque[order]
+                torque = np.interp(rpm_motor, curve_rpm, curve_torque,
+                                   left=curve_torque[0], right=curve_torque[-1])
+            else:
+                peak_power_w = float(peak_power_kw) * 1000.0
+                base_speed_rpm = (peak_power_w / float(peak_torque)) * 60 / (2 * np.pi)
+                # omega floored so the constant-torque region below base speed
+                # (including a 0 km/h grid point) can't divide by zero.
+                omega = np.maximum((rpm_motor * 2 * np.pi) / 60, 1e-6)
+                torque = np.where(rpm_motor < base_speed_rpm,
+                                  float(peak_torque), peak_power_w / omega)
+            torque = self.cap_torque_to_battery(torque, rpm_motor)
+            return torque * gear_ratio * gear_eff / wheel_radius
+
+        return wheel_force
+
+    def _accel_resistive_force(self, speeds_kmh, params):
+        """Resistive wheel force (N) over a km/h grid -- the same rolling +
+        aero + gradient model the acceleration view has always used."""
+        speeds_mps = np.asarray(speeds_kmh, dtype=float) / 3.6
+        theta = np.arctan(params.get('gradient', 0) / 100)
+        return (params['m_i'] * g * params['Crr']
+                + 0.5 * 1.225 * params['CdA'] * speeds_mps ** 2
+                + params['m_i'] * g * np.sin(theta))
+
+    def _accel_net_force_grid(self, wheel_force_fn, params,
+                              start_max_kmh=80.0, n_points=6000,
+                              hard_max_kmh=600.0):
+        """(speeds_kmh, net_force_N) covering the vehicle's real top speed.
+
+        The span is doubled until the net force at the top of the grid is
+        negative -- i.e. until the top speed is bracketed -- or `hard_max_kmh`
+        is reached (aero drag grows as v^2, so a crossing always exists; the
+        hard cap is only a runaway guard).
+        """
+        span = float(max(start_max_kmh, 10.0))
+        while True:
+            speeds = np.linspace(0.0, span, int(n_points))
+            net = np.asarray(wheel_force_fn(speeds), dtype=float) -                 self._accel_resistive_force(speeds, params)
+            if net[-1] < 0 or span >= hard_max_kmh:
+                return speeds, net
+            span = min(span * 2.0, hard_max_kmh)
+
+    def _accel_simulate(self, wheel_force_fn, params, wheel_radius,
+                        start_max_kmh=80.0, dt_s=0.001):
+        """Run one acceleration simulation for the full "Max Simulation Time".
+
+        Returns ``(time_s, speed_kmh, info)`` from calc_ext.simulate_acceleration.
+        """
+        speeds_kmh, net = self._accel_net_force_grid(
+            wheel_force_fn, params, start_max_kmh=start_max_kmh)
+        try:
+            max_time = float(self.max_time.get())
+        except Exception:
+            max_time = 60.0
+        if max_time <= 0:
+            max_time = 60.0
+        inertial_mass = self.get_effective_inertial_mass(params['m_i'], wheel_radius)
+        return simulate_acceleration(speeds_kmh, net, inertial_mass, max_time,
+                                     dt_s=dt_s)
+
+
     def plot_vehicle_max_speed_vs_time(self, speeds, params, wheel_radius, peak_torque, peak_power,gear_ratio):
-        """Plots vehicle speed vs. time as it accelerates with max available force."""
+        """Plots vehicle speed vs. time as it accelerates with max available force.
+
+        `speeds` is only a hint for where to start growing the internal speed
+        grid -- the simulation itself is NOT limited to it. It used to be, which
+        truncated the run at the torque plot's x-axis limit (see the note on
+        calc_ext.simulate_acceleration).
+        """
         if hasattr(self, "heatmap_colorbar") and self.heatmap_colorbar is not None:
             self.heatmap_colorbar.remove()
             self.heatmap_colorbar = None
@@ -602,122 +703,108 @@ class TorqueForceMixin:
         speed_ls = self.gs_linestyle("speed_style", "--")
         speed_lw = self.gs_float("speed_width", 2.0)
 
-        # Convert speeds to m/s
-        speeds_mps = np.array(speeds) / 3.6  # km/h to m/s
-        speeds_rpm = ((speeds_mps / wheel_radius) * 60 / (2 * np.pi))*gear_ratio  # Convert to motor RPM
-
-        # Convert power to watts
-        peak_power_w = peak_power * 1000
-
-        # --- Torque Calculation: Use Motor Data if available ---
-        if hasattr(self, "motor_dataframe") and self.motor_dataframe is not None:
-            # Interpolate torque from uploaded motor data
-            df = self.motor_dataframe
-            # Ensure sorted by speed
-            df_sorted = df.sort_values("motor_speed")
-            interp_torque = np.interp(
-                speeds_rpm,
-                df_sorted["motor_speed"].values,
-                df_sorted["motor_torque"].values,
-                left=df_sorted["motor_torque"].values[0],
-                right=df_sorted["motor_torque"].values[-1]
-            )
-            torque_values = interp_torque
-        else:
-            # Theoretical calculation
-            base_speed_rad_s = peak_power_w / peak_torque  # Base speed in rad/s
-            base_speed_rpm = (base_speed_rad_s * 60) / (2 * np.pi)  # Convert rad/s to RPM
-            torque_values = np.where(
-                speeds_rpm < base_speed_rpm, 
-                peak_torque, 
-                peak_power_w / ((speeds_rpm * 2 * np.pi) / 60)  # T = P / Ï‰
-            )
-
-        # Battery DC limit (optional): available torque clipped (map-aware
-        # when the efficiency maps are loaded).
-        torque_values = self.cap_torque_to_battery(torque_values, speeds_rpm)
-
-        # Calculate max wheel force (includes gear efficiency)
         gear_eff = self.get_gear_efficiency_value()
-        max_wheel_force = np.array(torque_values * gear_ratio * gear_eff / wheel_radius)
+        # Uploaded motor curve when present, otherwise the theoretical
+        # peak-torque / peak-power envelope -- same choice as before.
+        motor_curve = None
+        if hasattr(self, "motor_dataframe") and self.motor_dataframe is not None:
+            df_sorted = self.motor_dataframe.sort_values("motor_speed")
+            motor_curve = (df_sorted["motor_speed"].values,
+                           df_sorted["motor_torque"].values)
+        force_fn = self._accel_wheel_force_fn(
+            wheel_radius, gear_ratio, gear_eff,
+            peak_torque=peak_torque, peak_power_kw=peak_power,
+            motor_curve=motor_curve,
+        )
 
-        # Compute wheel resistance forces
-        wheel_forces = np.array([
-            params['m_i'] * g * params['Crr'] +
-            0.5 * 1.225 * params['CdA'] * (s ** 2) +
-            params['m_i'] * g * np.sin(np.arctan(params.get('gradient', 0) / 100))
-            for s in speeds_mps
-        ])
-        net_force = max_wheel_force - wheel_forces  # Available force for acceleration
+        try:
+            start_hint = float(np.max(np.asarray(speeds, dtype=float)))
+        except Exception:
+            start_hint = 80.0
+        time_values, velocity_kmh, info = self._accel_simulate(
+            force_fn, params, wheel_radius, start_max_kmh=start_hint)
 
-        # Compute maximum acceleration. Wheel rotational inertia adds J/r^2 of
-        # translational-equivalent mass to the inertial term only (the
-        # resistive forces above keep the actual mass). J=0 -> unchanged.
-        inertial_mass = self.get_effective_inertial_mass(params['m_i'], wheel_radius)
-        max_acceleration = net_force / inertial_mass
+        top_speed = info.get("top_speed_kmh")
+        settled_at = info.get("settled_at_s")
+        final_velocity = float(velocity_kmh[-1])
+        final_time = float(time_values[-1])
 
-        dt = 0.001  # seconds
-        max_time = float(self.max_time.get())  # Maximum simulation time in seconds
-        time_steps = np.arange(0, max_time, dt)  # Time array
+        # One plot call, one legend entry (this curve used to be drawn twice).
+        self.ax.plot(time_values, velocity_kmh, color=speed_c, linestyle=speed_ls,
+                     linewidth=speed_lw, label="Vehicle Speed")
 
-        # Initialize velocity array
-        velocity = [0]  # Start from rest
-
-        # Perform numerical integration
-        for t in time_steps[:-1]:  # Iterate through time steps
-            current_speed = velocity[-1]  # Get current velocity
-
-            # Find the closest speed in speeds_mps array
-            closest_idx = np.argmin(np.abs(speeds_mps - current_speed))
-            
-            # Get corresponding acceleration
-            current_acceleration = max_acceleration[closest_idx]
-
-            # Update velocity
-            new_velocity = velocity[-1] + current_acceleration * dt
-            
-            # Ensure velocity does not exceed max speed
-            if new_velocity >= speeds_mps[-1]:  
-                break
-
-            velocity.append(new_velocity)
-
-        # Convert time and velocity to numpy arrays
-        velocity = np.array(velocity)
-        velocity_kmh = np.array(velocity) * 3.6  
-        time_values = np.array(time_steps[:len(velocity)])
-
-
-        speed_target = float(self.target_speed.get())
-        index_60 = np.where(velocity_kmh >= speed_target)[0]  # Get all indices where speed >= target
-
-        if len(index_60) > 0:
-            time_60 = time_values[index_60[0]]  # First time when speed reaches target
-
-            # Plot the velocity curve
-            self.ax.plot(time_values, velocity_kmh, color=speed_c, linestyle=speed_ls, linewidth=speed_lw, label="Vehicle Speed")
-
-            # Mark the target speed point on the plot
-            self.ax.axvline(x=time_60, color='red', linestyle='--', label=f"{speed_target} km/h at {time_60:.1f}s")
-            self.ax.scatter(time_60, speed_target, color='red', zorder=3)  # Highlight the exact point
-
-            # Annotate the point
-            self.ax.text(time_60, speed_target + 5, f"{time_60:.1f}s", color='red', fontsize=10)
-            # Add horizontal line from y-axis to the intersection point
-            self.ax.axhline(y=speed_target, color='blue', linestyle='--', label=f"{speed_target} km/h")
-            self.ax.text(0.5, speed_target + 2, f"{speed_target:.0f} km/h", color='blue', fontsize=10)
+        if not info.get("launched", True):
+            # Resistance exceeds the available force at standstill: there is no
+            # acceleration run to show, so say that instead of drawing a flat
+            # line at 0 and calling it a result.
+            msg = ("Vehicle cannot move from rest: resistive force exceeds the "
+                   "available wheel force (check gradient, mass, gear ratio "
+                   "and peak torque).")
+            self.ax.text(0.5, 0.5, msg, transform=self.ax.transAxes, ha="center",
+                         va="center", color="red", fontsize=10, wrap=True)
+            self.set_status(msg, "error")
         else:
-            messagebox.showerror("Speed Error", "Vehicle never reaches " + str(float(self.target_speed.get())) + "km/h in the given simulation.")
+            speed_target = float(self.target_speed.get())
+            index_target = np.where(velocity_kmh >= speed_target)[0]
+            if len(index_target) > 0:
+                time_target = float(time_values[index_target[0]])
+                # Mark the target speed point on the plot
+                self.ax.axvline(x=time_target, color='red', linestyle='--',
+                                label=f"{speed_target} km/h at {time_target:.1f}s")
+                self.ax.scatter(time_target, speed_target, color='red', zorder=3)
+                self.ax.text(time_target, speed_target + 5, f"{time_target:.1f}s",
+                             color='red', fontsize=10)
+                # Add horizontal line from y-axis to the intersection point
+                self.ax.axhline(y=speed_target, color='blue', linestyle='--',
+                                label=f"{speed_target} km/h")
+                self.ax.text(0.5, speed_target + 2, f"{speed_target:.0f} km/h",
+                             color='blue', fontsize=10)
+                self.set_status(
+                    f"0-{speed_target:.0f} km/h in {time_target:.2f} s"
+                    + (f"; top speed {top_speed:.1f} km/h" if top_speed else ""),
+                    "ok")
+            else:
+                # Not reached -- explain WHY (target above the vehicle's top
+                # speed, or simply not enough simulation time) instead of the
+                # old bare "never reaches" modal, which also blocked report
+                # generation.
+                if top_speed is not None and speed_target > top_speed:
+                    why = (f"Target {speed_target:.0f} km/h is above the "
+                           f"vehicle's top speed of {top_speed:.1f} km/h.")
+                else:
+                    why = (f"Target {speed_target:.0f} km/h not reached within "
+                           f"the {final_time:.0f} s simulation time "
+                           f"(reached {final_velocity:.1f} km/h) - increase "
+                           f"Max Simulation Time.")
+                self.ax.axhline(y=speed_target, color='blue', linestyle=':',
+                                label=f"Target {speed_target:.0f} km/h (not reached)")
+                self.ax.text(0.02, 0.95, why, transform=self.ax.transAxes,
+                             ha="left", va="top", color="red", fontsize=9)
+                self.set_status(why, "warn")
 
-        self.ax.plot(time_values, velocity_kmh, color=speed_c, linestyle=speed_ls, linewidth=speed_lw, label="Vehicle Speed")
-        final_velocity = velocity_kmh[-1]
-        final_time = time_values[-1]
-        self.ax.scatter(final_time, final_velocity, color='green', zorder=3, label=f"Final: {final_velocity:.1f} km/h at {final_time:.1f}s")
-        self.ax.text(final_time, final_velocity + 2, f"{final_velocity:.1f} km/h", color='green', fontsize=10)
+            # Final point: distinguish "settled at top speed" from "still
+            # accelerating when the clock ran out". The old label always read
+            # "Final: <x-axis limit> km/h", which looked like a top speed.
+            if settled_at is not None:
+                final_label = (f"Top speed {final_velocity:.1f} km/h "
+                               f"(reached ~{settled_at:.1f}s)")
+            elif top_speed is not None:
+                final_label = (f"At {final_time:.0f}s: {final_velocity:.1f} km/h "
+                               f"(top speed {top_speed:.1f} km/h)")
+            else:
+                final_label = (f"At {final_time:.0f}s: {final_velocity:.1f} km/h "
+                               f"(still accelerating)")
+            self.ax.scatter(final_time, final_velocity, color='green', zorder=3,
+                            label=final_label)
+            # Right-aligned just inside the axis: the final point sits ON the
+            # right edge, so a left-aligned label would spill out of the figure.
+            self.ax.text(final_time, final_velocity + 2, f"{final_velocity:.1f} km/h",
+                         color='green', fontsize=10, ha='right')
 
         # Formatting
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("Vehicle Speed (km/h)")
+        self.ax.set_xlim(0, final_time)
         self.ax.legend()
         self.ax.set_title("Vehicle Speed vs. Time under Max Acceleration")
         # Grid/legend/spacing owned by Graph Settings; apply here so live

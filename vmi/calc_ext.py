@@ -234,3 +234,114 @@ def check_energy_invariants(metrics):
         if v is not None and not (0.0 <= v <= 1.0 + 1e-6):
             warns.append(f"{key} outside (0,1]: {v:.3f}")
     return warns
+
+
+# ---------------------------------------------------------------------------
+# Acceleration simulation
+# ---------------------------------------------------------------------------
+# The acceleration view used to integrate over the speed array built from the
+# TORQUE plot's x-axis limit (auto-filled to 0..80 km/h) and `break` out of the
+# integration the moment the speed reached the end of that array. Any vehicle
+# able to exceed the x-limit therefore stopped mid-simulation, long before
+# "Max Simulation Time" elapsed, and then reported that x-limit as its "Final"
+# speed -- a plot-axis number masquerading as a physical top speed. These two
+# helpers replace that: the grid is grown until the net force really crosses
+# zero (top_speed_from_net_force) and the integration always runs the full
+# requested duration (simulate_acceleration).
+
+
+def top_speed_from_net_force(speed_grid_kmh, net_force_n):
+    """Speed where the net tractive force first crosses from positive to zero.
+
+    `net_force_n` is available wheel force minus resistive force, sampled on
+    `speed_grid_kmh`. Returns the linearly interpolated crossing speed, 0.0
+    when the vehicle cannot even overcome resistance at standstill, or None
+    when the force is still positive at the top of the grid (the grid does not
+    reach the top speed -- grow it and ask again).
+
+    The FIRST positive->negative crossing is used, matching
+    ParametricMixin._estimate_top_speed: the vehicle stops accelerating there,
+    so a later feasible region of a non-monotonic (uploaded) motor curve is
+    unreachable. For the monotonic default model the two coincide.
+    """
+    speeds = np.asarray(speed_grid_kmh, dtype=float)
+    net = np.asarray(net_force_n, dtype=float)
+    feasible = net > 0
+    if not feasible[0]:
+        return 0.0
+    if feasible.all():
+        return None
+    first_neg = int(np.argmax(~feasible))          # >= 1 given the checks above
+    last_ok = first_neg - 1
+    x1, x2 = float(speeds[last_ok]), float(speeds[first_neg])
+    y1, y2 = float(net[last_ok]), float(net[first_neg])
+    if y2 == y1:
+        return x1
+    return x1 - y1 * (x2 - x1) / (y2 - y1)
+
+
+def simulate_acceleration(speed_grid_kmh, net_force_n, inertial_mass_kg,
+                          max_time_s, dt_s=0.001, settle_accel_mps2=1e-2):
+    """Integrate speed vs time from rest under the maximum available net force.
+
+    `net_force_n` (available wheel force - resistive force) is sampled over
+    `speed_grid_kmh`, which must extend past the vehicle's top speed; the net
+    force at the current speed is linearly interpolated between samples and
+    the end values are held outside the grid.
+
+    The integration ALWAYS covers the full `max_time_s`: once the net force
+    reaches zero the speed simply stops rising, so the curve asymptotes to the
+    real top speed instead of being truncated. It never stops early because of
+    how far the speed grid happens to reach.
+
+    Returns ``(time_s, speed_kmh, info)``, all speeds in km/h, where info has:
+
+        launched        False when the vehicle cannot move from rest at all
+                        (net force <= 0 at standstill); the returned speed is
+                        then flat 0.
+        top_speed_kmh   zero-crossing speed of the net force, or None when the
+                        grid never crosses (caller's grid is too short).
+        settled_at_s    first time the acceleration fell below
+                        `settle_accel_mps2` (default 0.01 m/s^2 -- over a
+                        minute that is under 1 km/h, i.e. the vehicle has
+                        effectively reached its top speed). None -> still
+                        meaningfully accelerating when time ran out.
+        final_speed_kmh speed at the last sample.
+    """
+    speeds = np.asarray(speed_grid_kmh, dtype=float)
+    net = np.asarray(net_force_n, dtype=float)
+    mass = float(inertial_mass_kg)
+    dt = float(dt_s)
+    max_time = float(max_time_s)
+    if mass <= 0:
+        raise ValueError("inertial mass must be positive")
+    if dt <= 0:
+        raise ValueError("dt must be positive")
+
+    info = {
+        "launched": bool(net[0] > 0),
+        "top_speed_kmh": top_speed_from_net_force(speeds, net),
+        "settled_at_s": None,
+    }
+
+    n_steps = max(int(np.floor(max_time / dt)) + 1, 1)
+    time_s = np.arange(n_steps, dtype=float) * dt
+    v_mps = np.zeros(n_steps, dtype=float)
+
+    if not info["launched"]:
+        info["final_speed_kmh"] = 0.0
+        return time_s, v_mps * 3.6, info
+
+    speeds_mps = speeds / 3.6
+    for i in range(1, n_steps):
+        v = v_mps[i - 1]
+        f = float(np.interp(v, speeds_mps, net, left=net[0], right=net[-1]))
+        a = f / mass
+        if a <= settle_accel_mps2 and info["settled_at_s"] is None:
+            info["settled_at_s"] = float(time_s[i - 1])
+        # Forward Euler, clamped at rest: a negative net force past the top
+        # speed pulls the speed back to equilibrium rather than below zero.
+        v_mps[i] = max(v + a * dt, 0.0)
+
+    info["final_speed_kmh"] = float(v_mps[-1] * 3.6)
+    return time_s, v_mps * 3.6, info

@@ -270,38 +270,19 @@ class CompareStdMixin:
                 self.ax.set_title("Compare Standard Motor Data: Force")
 
             elif plot_type == "acceleration":
-                # Simulate velocity-time for this std motor (interpolated torque)
-                speeds_kmh = np.linspace(0.1, max_speed, 6000)
-                speeds_mps = speeds_kmh / 3.6
-                speeds_rpm_wheel = speeds_mps * 60 / (2 * np.pi * std_wheel_radius)
-                speeds_rpm_motor = speeds_rpm_wheel * std_gear_ratio
-                interp_torque = np.interp(speeds_rpm_motor, speeds_rpm_std, torque_std, left=torque_std[0], right=torque_std[-1])
-                interp_torque = self.cap_torque_to_battery(interp_torque, speeds_rpm_motor)
-                max_wheel_force = interp_torque * std_gear_ratio * gear_eff / std_wheel_radius
-                wheel_forces = np.array([
-                    params['m_i'] * g * params['Crr'] +
-                    0.5 * 1.225 * params['CdA'] * (s ** 2) +
-                    params['m_i'] * g * np.sin(np.arctan(params.get('gradient', 0) / 100))
-                    for s in speeds_mps
-                ])
-                net_force = max_wheel_force - wheel_forces
-                # Wheel rotational inertia (J/r^2) slows the m*a term only.
-                max_acceleration = net_force / self.get_effective_inertial_mass(params['m_i'], std_wheel_radius)
-                dt = 0.01
-                max_time = float(self.max_time.get())
-                time_steps = np.arange(0, max_time, dt)
-                velocity = [0]
-                for t in time_steps[:-1]:
-                    current_speed = velocity[-1]
-                    closest_idx = np.argmin(np.abs(speeds_mps - current_speed))
-                    current_acceleration = max_acceleration[closest_idx]
-                    new_velocity = velocity[-1] + current_acceleration * dt
-                    if new_velocity >= speeds_mps[-1]:
-                        break
-                    velocity.append(new_velocity)
-                velocity = np.array(velocity)
-                velocity_kmh = velocity * 3.6
-                time_values = np.array(time_steps[:len(velocity)])
+                # Simulate velocity-time for this std motor (interpolated
+                # torque). Routed through the shared TorqueForceMixin helpers so
+                # this can't drift from the Acceleration view -- and, crucially,
+                # so it runs the FULL "Max Simulation Time" over a speed grid
+                # grown to the vehicle's real top speed, instead of stopping the
+                # moment the speed reached the torque plot's x-axis limit.
+                force_fn = self._accel_wheel_force_fn(
+                    std_wheel_radius, std_gear_ratio, gear_eff,
+                    motor_curve=(speeds_rpm_std, torque_std),
+                )
+                time_values, velocity_kmh, accel_info = self._accel_simulate(
+                    force_fn, params, std_wheel_radius,
+                    start_max_kmh=max_speed, dt_s=0.01)
                 self.ax.plot(time_values, velocity_kmh, label=f"{name} (Velocity-Time)", linewidth=self.gs_float("line_width", 2.0))
                 self.ax.set_xlabel("Time (s)")
                 self.ax.set_ylabel("Vehicle Speed (km/h)")
@@ -314,6 +295,12 @@ class CompareStdMixin:
                     self.ax.axvline(x=time_target, color='orange', linestyle='--', label=f"{name} {speed_target} km/h at {time_target:.1f}s")
                     self.ax.scatter(time_target, speed_target, color='orange', zorder=3)
                     self.ax.text(time_target, speed_target + 2, f"{time_target:.1f}s", color='orange', fontsize=10)
+                else:
+                    top = accel_info.get("top_speed_kmh")
+                    self.set_status(
+                        f"{name}: {speed_target:.0f} km/h not reached"
+                        + (f" (top speed {top:.1f} km/h)" if top else ""),
+                        "warn")
         if plot_type == "torque":
             # "Y-axis Limit (Nm) motor" vs "...wheel" are two separate entry
             # fields (Simulation Settings section) -- read/write whichever one
