@@ -1,21 +1,21 @@
 """Local RAG knowledge base: file ingestion + similarity search over Chroma.
 
-Everything the assistant can retrieve lives under two kinds of sources:
-  - `knowledge_base/` (standards/, datasheets/, products/, scenarios/) -- the
-    user's own drop folder. Add a file, click "Rebuild Knowledge Base"; delete
-    a file, rebuild again -- it disappears from the index. That add/rebuild/
-    delete/rebuild cycle is the entire maintenance workflow.
-  - A small fixed set of files the app already produces: CLAUDE.md (so the
-    assistant can answer "how does this analysis work"), std_motor_data_sample.json
-    (the standard-motor library) and the sample scenario JSONs.
+Everything the assistant can retrieve lives under `knowledge_base/`
+(standards/, datasheets/, products/, scenarios/) -- the user's own drop folder.
+Add a file, click "Rebuild Knowledge Base"; delete a file, rebuild again -- it
+disappears from the index. "How does the app work" questions are answered from
+assistant_core.APP_GUIDE instead of indexing developer notes (CLAUDE.md made
+the model answer with class names).
 
 No embeddings/text ever leaves the machine -- chunking + embedding + storage
 are all local (embeddings via Ollama through llm_client, storage via Chroma's
 on-disk PersistentClient).
 """
 
+import hashlib
 import json
 import os
+import re
 
 import chromadb
 
@@ -29,14 +29,12 @@ COLLECTION_NAME = "vmi_knowledge"
 
 CHUNK_WORDS = 300
 CHUNK_OVERLAP = 50
-
-EXTRA_FILES = [
-    os.path.join(PROJECT_ROOT, "CLAUDE.md"),
-    os.path.join(PROJECT_ROOT, "std_motor_data_sample.json"),
-]
-EXTRA_GLOBS = [
-    os.path.join(PROJECT_ROOT, "sample_data", "vmi_scenario*.json"),
-]
+# Bump when chunking/embedding changes: the next rebuild re-indexes everything.
+INDEX_VERSION = 3
+# Cosine distance above which a chunk is treated as unrelated to the question.
+# ponytail: fixed cutoff measured on this KB (relevant 0.20-0.33, unrelated 0.334+);
+# re-measure if the embedding model changes or relevant chunks go missing.
+MAX_DISTANCE = 0.33
 
 
 def _iter_index_files():
@@ -46,18 +44,9 @@ def _iter_index_files():
         if os.path.abspath(root).startswith(os.path.abspath(INDEX_DIR)):
             continue
         for fname in files:
+            if os.path.splitext(fname)[1].lower() not in {".pdf", ".docx", ".xlsx", ".xls", ".txt", ".md", ".csv", ".json"}:
+                continue
             path = os.path.join(root, fname)
-            if path not in seen:
-                seen.add(path)
-                yield path
-    for path in EXTRA_FILES:
-        if os.path.isfile(path) and path not in seen:
-            seen.add(path)
-            yield path
-    import glob
-    for pattern in EXTRA_GLOBS:
-        for path in glob.glob(pattern):
-            path = os.path.abspath(path)
             if path not in seen:
                 seen.add(path)
                 yield path
@@ -72,16 +61,47 @@ def _extract_text(path):
     if ext == ".docx":
         import docx
         doc = docx.Document(path)
-        return "\n".join(p.text for p in doc.paragraphs)
+        paragraphs = [p.text for p in doc.paragraphs]
+        tables = [" | ".join(cell.text for cell in row.cells)
+                  for table in doc.tables for row in table.rows]
+        return "\n".join(paragraphs + tables)
     if ext in (".xlsx", ".xls"):
         import pandas as pd
         sheets = pd.read_excel(path, sheet_name=None)
-        return "\n\n".join(
-            f"[sheet: {name}]\n{sheet.to_string(index=False)}"
-            for name, sheet in sheets.items()
-        )
+        parts = []
+        for name, sheet in sheets.items():
+            ranges = ", ".join(f"{col}: {sheet[col].min():.4g} to {sheet[col].max():.4g}"
+                               for col in sheet.columns if pd.api.types.is_numeric_dtype(sheet[col])
+                               and sheet[col].notna().any())
+            parts.append(f"Table {os.path.basename(path)} sheet {name}, {len(sheet)} rows. "
+                         f"Column ranges: {ranges}\n{_table_facts(sheet)}"
+                         f"{sheet.to_csv(index=False, float_format='%.4g')}")
+        return "\n\n".join(parts)
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         return f.read()
+
+
+def _table_facts(sheet):
+    """Plain-sentence peaks, because small models misread raw CSV (e.g. called a
+    flat-torque region "constant power"). Curve tables: where each column peaks,
+    against the first column. Map tables (numeric headers): the largest cell."""
+    import pandas as pd
+    numeric = [c for c in sheet.columns if pd.api.types.is_numeric_dtype(sheet[c]) and sheet[c].notna().any()]
+    if len(numeric) < 2:
+        return ""
+    key, facts = numeric[0], []
+    if all(isinstance(c, (int, float)) for c in numeric[1:]):
+        body = sheet[numeric[1:]]
+        row, col = body.stack().idxmax()
+        facts.append(f"Largest value in the map: {body.loc[row, col]:.4g}, in column header {col} "
+                     f"on the row whose first-column value is {sheet.loc[row, key]:.4g}.")
+    else:
+        for col in numeric[1:]:
+            peak = sheet[col].max()
+            at = sheet.loc[sheet[col] >= peak - 1e-6 * abs(peak), key]
+            where = f"{at.min():.4g}" if at.min() == at.max() else f"{at.min():.4g} to {at.max():.4g}"
+            facts.append(f"{col} peaks at {peak:.4g} for {key} {where}.")
+    return "Key facts: " + " ".join(facts) + "\n"
 
 
 def _chunk_text(text, chunk_words=CHUNK_WORDS, overlap=CHUNK_OVERLAP):
@@ -112,10 +132,21 @@ def _save_manifest(manifest):
         json.dump(manifest, f, indent=2)
 
 
-def _get_collection():
+def _get_collection(reset=False):
     os.makedirs(INDEX_DIR, exist_ok=True)
     client = chromadb.PersistentClient(path=INDEX_DIR)
-    return client.get_or_create_collection(COLLECTION_NAME)
+    if reset:
+        try:
+            client.delete_collection(COLLECTION_NAME)
+        except Exception:
+            pass
+    return client.get_or_create_collection(COLLECTION_NAME, metadata={"hnsw:space": "cosine"})
+
+
+def _embed_document(text):
+    # nomic-embed-text is trained with these task prefixes; without them
+    # questions and chunks land in different regions of the space.
+    return llm_client.embed("search_document: " + text, gpu=True)
 
 
 def rebuild_index(progress=None):
@@ -127,9 +158,13 @@ def rebuild_index(progress=None):
     thread itself).
     Returns (n_files_indexed, n_chunks, warnings: list[str]).
     """
-    collection = _get_collection()
     manifest = _load_manifest()
+    fresh = manifest.get("__version__") != INDEX_VERSION
+    collection = _get_collection(reset=fresh)
+    if fresh:
+        manifest = {"__version__": INDEX_VERSION}
     current_paths = set()
+    seen_text = {}
     warnings = []
     n_files, n_chunks = 0, 0
 
@@ -146,35 +181,33 @@ def rebuild_index(progress=None):
         if progress:
             progress(f"Indexing {os.path.relpath(path, PROJECT_ROOT)}...")
 
-        if prev is not None:
-            old_ids = [f"{path}::{i}" for i in range(prev.get("n_chunks", 0))]
-            if old_ids:
-                try:
-                    collection.delete(ids=old_ids)
-                except Exception:
-                    pass
-
         try:
             text = _extract_text(path)
+            digest = hashlib.sha1(text.encode("utf-8", "ignore")).hexdigest()
+            if digest in seen_text or any(isinstance(v, dict) and v.get("digest") == digest
+                                          for k, v in manifest.items() if k != path and os.path.isfile(k)):
+                continue  # identical copy of a file already indexed
+            seen_text[digest] = path
+            chunks = _chunk_text(text)
+            embeddings = [_embed_document(f"{os.path.basename(path)}: {c}") for c in chunks]
         except Exception as e:
             warnings.append(f"{os.path.relpath(path, PROJECT_ROOT)}: {e}")
-            manifest.pop(path, None)
             continue
 
-        chunks = _chunk_text(text)
         if chunks:
             ids = [f"{path}::{i}" for i in range(len(chunks))]
-            embeddings = [llm_client.embed(c) for c in chunks]
-            metadatas = [{"source": os.path.relpath(path, PROJECT_ROOT)} for _ in chunks]
+            metadatas = [{"source": os.path.relpath(path, PROJECT_ROOT), "chunk": i + 1} for i in range(len(chunks))]
             collection.upsert(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
+        if prev and prev.get("n_chunks", 0) > len(chunks):
+            collection.delete(ids=[f"{path}::{i}" for i in range(len(chunks), prev["n_chunks"])])
 
-        manifest[path] = {"mtime": mtime, "n_chunks": len(chunks)}
+        manifest[path] = {"mtime": mtime, "n_chunks": len(chunks), "digest": digest}
         n_files += 1
         n_chunks += len(chunks)
 
     # Anything in the old manifest that no longer exists on disk: drop its chunks.
     for path in list(manifest.keys()):
-        if path not in current_paths:
+        if path != "__version__" and path not in current_paths:
             old_ids = [f"{path}::{i}" for i in range(manifest[path].get("n_chunks", 0))]
             if old_ids:
                 try:
@@ -187,16 +220,44 @@ def rebuild_index(progress=None):
     return n_files, n_chunks, warnings
 
 
-def query(question, top_k=5):
-    """Returns a list of {"text": str, "source": str} for the closest chunks."""
+def _source_label(meta, doc_id):
+    meta = meta or {}
+    chunk = meta.get("chunk")
+    if chunk is None:
+        try:
+            chunk = int(doc_id.rsplit("::", 1)[1]) + 1
+        except (ValueError, IndexError):
+            pass
+    source = meta.get("source", "unknown")
+    return source + (f"#chunk-{chunk}" if chunk is not None else "")
+
+
+def query(question, top_k=3, max_distance=MAX_DISTANCE):
+    """Returns up to top_k {"text", "source"} chunks relevant to the question:
+    chunks of any file whose name is mentioned (e.g. "U546"), then the nearest
+    chunks within max_distance. Empty list when nothing is relevant."""
     collection = _get_collection()
-    if collection.count() == 0:
+    count = collection.count()
+    if count == 0:
         return []
-    q_embedding = llm_client.embed(question)
-    result = collection.query(query_embeddings=[q_embedding], n_results=min(top_k, collection.count()))
-    hits = []
-    docs = result.get("documents", [[]])[0]
-    metas = result.get("metadatas", [[]])[0]
-    for doc, meta in zip(docs, metas):
-        hits.append({"text": doc, "source": (meta or {}).get("source", "unknown")})
-    return hits
+    hits, seen = [], set()
+    # Only product-code-like words (letters + digits, e.g. "u546") pick a file by
+    # name; plain words like "torque" or "mechanical" matched unrelated files.
+    words = {w for w in re.findall(r"[a-z0-9]{3,}", question.lower()) if re.search(r"\d", w)}
+    for path, entry in _load_manifest().items():
+        if path == "__version__" or not isinstance(entry, dict):
+            continue
+        stem_words = set(re.findall(r"[a-z0-9]{3,}", os.path.splitext(os.path.basename(path))[0].lower()))
+        if stem_words & words:
+            ids = [f"{path}::{i}" for i in range(min(entry.get("n_chunks", 0), 2))]
+            got = collection.get(ids=ids) if ids else {"ids": []}
+            for doc_id, doc, meta in zip(got["ids"], got["documents"], got["metadatas"]):
+                seen.add(doc_id)
+                hits.append({"text": doc, "source": _source_label(meta, doc_id)})
+    result = collection.query(query_embeddings=[llm_client.embed("search_query: " + question)],
+                              n_results=min(top_k, count), include=["documents", "metadatas", "distances"])
+    for doc_id, doc, meta, dist in zip(result["ids"][0], result["documents"][0],
+                                       result["metadatas"][0], result["distances"][0]):
+        if dist <= max_distance and doc_id not in seen:
+            hits.append({"text": doc, "source": _source_label(meta, doc_id)})
+    return hits[:top_k]

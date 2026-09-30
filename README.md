@@ -134,6 +134,8 @@ vmi/                        The application's source code
 tests/                      Automated tests that lock the physics formulas (see below)
 sample_data/                Generated sample files (created by step 6, not tracked in git)
 knowledge_base/             Your own reference documents for the Assistant sidebar (see below)
+tools/                      Assistant benchmark scripts (questionnaire.py, benchmark_assistant.py)
+docs/                       Assistant model evaluation results
 ```
 
 You don't need to open or understand the code in `vmi/` to use the app.
@@ -153,32 +155,96 @@ changed — which should only ever happen deliberately.
 
 ## The Assistant sidebar (optional, local AI chat)
 
-The app has a collapsible chat panel (click "💬 Assistant" in the toolbar)
-that can answer questions using your own documents — testing standards,
-datasheets, saved scenarios, etc. It runs a small AI model entirely on your
-own computer using [Ollama](https://ollama.com) — nothing is sent to the
-internet.
+Click **💬 Assistant** in the toolbar to open a chat panel that answers
+questions about EV motors and control, your current analysis, how this app
+calculates things, and the reference documents you put in `knowledge_base/`.
+It runs entirely on your own computer through [Ollama](https://ollama.com) —
+nothing is sent to the internet. If you skip this section, the rest of the
+app works exactly the same.
 
-To use it:
+### Setup (home PC or office laptop)
 
-1. Install [Ollama](https://ollama.com/download) for Windows and run it once.
-2. In a terminal, run:
+1. **Install Ollama** — download *OllamaSetup.exe* from
+   <https://ollama.com/download> and run it. It installs for your user
+   account (no admin rights normally needed) and runs in the system tray.
+2. **Download the two models** (once, about 2.8 GB total) in a terminal:
    ```
-   ollama pull llama3.1:8b
+   ollama pull qwen3:4b-instruct
    ollama pull nomic-embed-text
    ```
-3. Drop any PDF, Word, or Excel reference files you want the assistant to
-   know about into the `knowledge_base/` subfolders (`standards/`,
-   `datasheets/`, `products/`, `scenarios/`).
-4. In the app's Assistant panel, click **"Rebuild Knowledge Base"**.
-5. Ask it questions.
+   | Model | Size | What it does |
+   |---|---|---|
+   | `qwen3:4b-instruct` | 2.5 GB | Writes the answers (the default chat model) |
+   | `nomic-embed-text` | 274 MB | Searches your `knowledge_base/` documents |
+3. **Install the Python packages** if you haven't already:
+   `pip install -r requirements.txt` (includes `requests`, `chromadb`,
+   `pypdf`, `python-docx`).
+4. **Copy your reference documents** into the `knowledge_base/` subfolders
+   (`standards/`, `datasheets/`, `products/`, `scenarios/`). These folders
+   are git-ignored on purpose (datasheets and standards are often licensed),
+   so they are **not** in the GitHub repo — copy them over by hand
+   (USB / OneDrive).
+5. Start the app, open the Assistant, click **⚙ → Rebuild knowledge base**
+   (once, and again whenever you add or remove documents).
+6. Ask a question.
 
-If you skip this section entirely, the rest of the app works exactly the
-same — the Assistant is optional.
+Check it works: `ollama list` should show both models, and
+`ollama run qwen3:4b-instruct "hello"` should reply.
 
-Every question and answer is logged locally to `assistant_chat_log.jsonl` in
-this folder, so you can review how the assistant is performing over time.
-This file is just for you — it is not uploaded to GitHub (see `.gitignore`).
+**Office network blocks `ollama pull`?** Copy the downloaded models from a PC
+that has them: the folder `C:\Users\<you>\.ollama\models` → the same path on
+the laptop (or set the `OLLAMA_MODELS` environment variable to wherever you
+put the folder), then restart Ollama.
+
+### Hardware and model choice
+
+| Laptop | What to expect with `qwen3:4b-instruct` |
+|---|---|
+| NVIDIA GPU with 4 GB+ (e.g. GTX 1650) | ~35 words/s; casual replies instant, most answers 5–10 s, document questions 20–30 s |
+| Smaller / no NVIDIA GPU | Works automatically (the app falls back to Ollama's own CPU/GPU split) but several times slower |
+
+On a slow CPU-only laptop, `llama3.2:3b` (`ollama pull llama3.2:3b`, 2 GB) is
+the fastest alternative, at noticeably lower accuracy on motor questions. Pick
+it under **⚙ → Model** — the choice is remembered. See
+[`docs/assistant_evaluation.md`](docs/assistant_evaluation.md) for the
+measured comparison of seven local models.
+
+### Using it
+
+- **Use current analysis** (switch under the input box): for questions about
+  *your* work ("why is my top speed low?", "is my motor enough for 20%?") the
+  assistant receives the visible inputs, the app's computed results and a
+  summary of the plotted lines.
+- **Quick actions:** *Suggest improvements*, *Explain my plot*, *What can you do?*
+- **Documents:** answers that use your files cite them, e.g.
+  `[EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx#chunk-2]`. Excel curves
+  and maps are indexed with their key facts (peak torque and the speed range
+  it holds over, peak efficiency and where it occurs).
+- **Checked arithmetic:** fully specified shaft-power, DC-to-shaft
+  efficiency, wheel torque / tractive force, grade force and range questions
+  are calculated exactly in code rather than by the model. Greetings and
+  small talk are answered instantly without the model.
+- It won't invent standard clause numbers or test limits, or declare a test
+  passed or a product compliant — it asks for the source and data instead.
+- **⚙ → Compare models** runs any installed models on the same motor
+  questions so you can review the answers and timings side by side.
+
+### Evaluating the assistant
+
+`tests/assistant_questionnaire.json` holds 42 questions in three groups —
+casual conversation, motor design and control, and this software's analyses
+and parameters — each with automatic checks (required facts, forbidden
+content, word limit, expected document). Run it against any models:
+```
+python tools/questionnaire.py --models qwen3:4b-instruct llama3.2:3b
+python tools/questionnaire.py --report reports/questionnaire_*.jsonl
+```
+It goes through the same routing as the chat panel and records load time,
+retrieval time, time to first word, total time, words/s, accuracy and style.
+
+Every question and answer is also logged locally to `assistant_chat_log.jsonl`
+so you can review how the assistant performs over time. This file is just for
+you — it is not uploaded to GitHub (see `.gitignore`).
 
 ---
 

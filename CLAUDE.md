@@ -257,7 +257,7 @@ vmi/app.py
 | `enhancements.py` | `EnhancementsMixin` | Cross-cutting *new* features: toolbar, status bar, figure/data export, multi-analysis HTML report, save/load scenario, dark-plot toggle, Enter-to-plot, `_safe_plot` error wrapper, loss waterfall. |
 | `graph_settings.py` | `GraphSettingsMixin` | Per-analysis "Graph Settings" panel (line colors/styles/widths, grid/legend/title sizes, colormap, contour levels). Schema-driven; values in `self._gs_values`; read in plot code via `self.gs_*()`. |
 | `assistant.py` | `AssistantMixin` | Collapsible chat sidebar (local LLM + RAG). See §7c. |
-| `llm_client.py` | (module) | Thin `requests` wrapper around a local Ollama server (`chat()`, `embed()`). |
+| `llm_client.py` | (module) | Thin `requests` wrapper around a local Ollama server (`stream_chat()`, `warm_up()`, `embed()`). |
 | `rag_store.py` | (module) | Chroma-backed knowledge-base ingestion (`rebuild_index()`) and retrieval (`query()`). |
 
 ---
@@ -686,49 +686,55 @@ corresponding xlim entry box so the shown limit matches the axis.
 
 A third pane in the top-level `tk.PanedWindow` (`self.paned`, `self.container`
 are stored on `self` in `app.py::__init__` for this purpose), toggled by the
-"💬 Assistant" toolbar button (`toggle_assistant_panel`, `enhancements.py`'s
-`build_toolbar`). Closed by default — `paned.add(self.assistant_panel,
-before=self.container, ...)` / `paned.forget(...)`.
+"💬 Assistant" toolbar button (`toggle_assistant_panel`). Closed by default.
+Layout: dark header (New chat, ⚙ drawer with model picker / Compare models /
+Rebuild knowledge base), chat textbox (tags `user_label`/`user`/
+`assistant_label`/`assistant`/`meta`), quick-action chips, input card,
+footer with the `screen_toggle` switch + status. Widget attribute names
+(`model_picker`, `screen_toggle`, `assistant_entry`, `assistant_history`,
+`assistant_send_btn`, `assistant_kb_btn`, `assistant_status_label`) are used
+by tests — keep them.
 
-**Everything runs locally through Ollama** (`llm_client.py`,
-`http://localhost:11434`) — no cloud calls. Requires `ollama pull llama3.1:8b`
-(chat) and `ollama pull nomic-embed-text` (embeddings) once, outside the app.
-`TIMEOUT_S = 300`: the first chat after Ollama (re)starts loads the 8B model
-into memory, which alone measured >120 s on this CPU-only machine.
+**Files.** `assistant.py` (Tk panel only), `assistant_core.py` (UI-free:
+`SYSTEM_PROMPT`, `APP_GUIDE`, routing, checked calculations, Markdown→Tk
+spans), `llm_client.py` (Ollama HTTP), `rag_store.py` (Chroma index),
+`assistant_lab.py` (Compare-models window). Evaluation:
+`tests/assistant_questionnaire.json` + `tools/questionnaire.py`; results and
+rationale in `docs/assistant_evaluation.md`.
 
-**Persona system prompt (2026-07).** `SYSTEM_PROMPT` in `assistant.py` casts
-the assistant as a senior EV powertrain design engineer (machines, power
-electronics, mechanical, thermal, batteries, standards) with two explicit
-modes: KB context present → answer from it, marking each fact
-`(source: <file>)`; context missing → prefix `"Not in the knowledge base —
-engineering judgment:"` and answer anyway from expertise (the old prompt told
-it to stop when context was missing, which made it useless without data).
-Two things llama3.1:8b needs to follow this reliably, both verified by live
-test: (1) the prompt must NOT contain a concrete example citation with a fake
-filename/number — the model parrots it verbatim as if it were data ("only
-cite file names that literally appear in [brackets]" instead); (2)
-`_chat_worker` restates the citation rule right next to the question (the
-`reminder` suffix, only when retrieval hits exist) — with the rule only in
-the system prompt the model used the data but dropped the source markings.
+**Routing (`_chat_worker`).** `small_talk_reply` / `checked_calculation_reply`
+answer instantly in code → else `rag_store.query` → app state
+(`_screen_snapshot`) only when `wants_screen_context()` → `build_messages` →
+`llm_client.stream_chat`.
 
-**Knowledge base** (`rag_store.py`, Chroma `PersistentClient` under
-`knowledge_base/.index/`): indexes everything under `knowledge_base/`
-(`standards/`, `datasheets/`, `products/`, `scenarios/` — drop PDFs/Word/Excel/
-text files in any of these) plus `CLAUDE.md`, `std_motor_data_sample.json`,
-and `sample_data/vmi_scenario*.json`. **To add or remove something from what
-the assistant knows: add/delete the file, then click "Rebuild Knowledge
-Base."** `rebuild_index()` diffs against `knowledge_base/.index/manifest.json`
-(path → mtime) so only changed files are re-embedded and deleted files have
-their chunks dropped — safe to click after every small change, not just a
-full rescan.
+**Latency contracts (measured on a 4 GB GTX 1650 — don't regress):**
+- Query embeddings run on the CPU (`embed(..., gpu=False)`, ~0.05 s). On the
+  GPU the embedder evicted the chat model → ~14 s before every first word.
+  Index rebuilds use `gpu=True`.
+- `system_prompt()` must be identical for every question so Ollama reuses its
+  cached KV state; put per-question content (checked calculations, app state,
+  excerpts) in the user turn.
+- `_warm_up_model()` preloads model + system prompt when the panel opens or
+  the model changes.
+- The default `CHAT_MODEL` is forced fully onto the GPU (`num_gpu=99`); if
+  that fails before any text streams, `stream_chat` retries with Ollama's own
+  placement (office laptops with small/no GPU).
 
-**This is the app's first background-threading code.** Everything else in
-`vmi/` runs synchronously on the Tk main loop (see §8) — `AssistantMixin`
-introduces `threading.Thread` for LLM calls / index rebuilds, with a
-`queue.Queue` + `self.after(150, self._poll_assistant_queue)` to marshal
-results back to the main thread. Don't touch any Tk widget from inside
-`_chat_worker` / the rebuild `worker()` — push onto `self._assistant_queue`
-instead, exactly like the existing "chat_reply"/"kb_done"/etc. message types.
+**RAG contracts.** Only product-code words containing digits (e.g. `u546`)
+select a file by name — generic words matched unrelated files. Excerpts are
+cut at 2600 chars (chunks ~2100). Excel files are indexed with
+`_table_facts()` key-fact sentences because small models misread raw CSV.
+Bump `INDEX_VERSION` whenever extraction/chunking changes.
+
+**Model choice.** `qwen3:4b-instruct` (default) + `nomic-embed-text`; chosen
+by the questionnaire (0.95 accuracy vs 0.76–0.80 for phi4-mini, llama3.2:3b,
+gemma3:4b). Re-run `python tools/questionnaire.py --models ...` after any
+prompt or model change and compare against `docs/assistant_evaluation.md`.
+
+**Threading.** `AssistantMixin` uses `threading.Thread` for LLM calls / index
+rebuilds / warm-up, with a `queue.Queue` + `self.after(150,
+self._poll_assistant_queue)` to marshal results back. Never touch a Tk widget
+from a worker thread — push onto `self._assistant_queue`.
 
 ## 7d. Multi-analysis HTML report
 

@@ -49,3 +49,6 @@ knowledge_base/scenarios/*
 # --- Optional brand assets (may be a company's logo/trademark) ---
 tvs_logo.webp
 motor.jpg
+assistant_settings.json
+assistant_settings.tmp
+assistant_benchmark_cases.json
