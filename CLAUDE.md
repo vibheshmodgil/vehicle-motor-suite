@@ -700,12 +700,20 @@ by tests — keep them.
 spans), `llm_client.py` (Ollama HTTP), `rag_store.py` (Chroma index),
 `assistant_lab.py` (Compare-models window). Evaluation:
 `tests/assistant_questionnaire.json` + `tools/questionnaire.py`; results and
-rationale in `docs/assistant_evaluation.md`.
+rationale in `docs/assistant_evaluation.md`. The broader QA corpus is
+`tests/assistant_qa_cases.json`, with offline routing and RAG probes in
+`tools/assistant_qa.py` and `tools/assistant_rag_probe.py`; see
+`docs/assistant_qa_report.md`.
 
-**Routing (`_chat_worker`).** `small_talk_reply` / `checked_calculation_reply`
-answer instantly in code → else `rag_store.query` → app state
-(`_screen_snapshot`) only when `wants_screen_context()` → `build_messages` →
-`llm_client.stream_chat`.
+**Routing (`plan_request` + `_chat_worker`).** Common small talk and fully
+specified checked arithmetic answer locally. Plot and parameter-edit requests
+get an explicit unavailable-action response: there is no assistant-controlled
+simulation/plot/edit API. Explicit document intent queries RAG, and exact
+documented comparisons can be answered in code. State questions capture live
+widgets on the Tk thread; simple field reads use those values directly.
+Other questions use the chosen local chat model. Model chunks are buffered
+until a final response is validated, so internal/tool-shaped payloads are not
+shown. The same route is used by `answer_case` and the model questionnaire.
 
 **Latency contracts (measured on a 4 GB GTX 1650 — don't regress):**
 - Query embeddings run on the CPU (`embed(..., gpu=False)`, ~0.05 s). On the
@@ -722,9 +730,13 @@ answer instantly in code → else `rag_store.query` → app state
 
 **RAG contracts.** Only product-code words containing digits (e.g. `u546`)
 select a file by name — generic words matched unrelated files. Excerpts are
-cut at 2600 chars (chunks ~2100). Excel files are indexed with
-`_table_facts()` key-fact sentences because small models misread raw CSV.
-Bump `INDEX_VERSION` whenever extraction/chunking changes.
+bounded by the 10,000-character prompt budget (maximum 2600 chars each).
+Excel files are indexed with `_table_facts()` key-fact sentences because small
+models misread raw CSV. PDFs retain page metadata in source labels; other
+formats cite `#chunk-N`. A named TSI needs an actual indexed TSI file.
+Uncited model prose is replaced by a short sourced excerpt, and absent
+evidence is stated. Bump `INDEX_VERSION` whenever extraction/chunking changes
+and rebuild the index after changing it.
 
 **Model choice.** `qwen3:4b-instruct` (default) + `nomic-embed-text`; chosen
 by the questionnaire (0.95 accuracy vs 0.76–0.80 for phi4-mini, llama3.2:3b,

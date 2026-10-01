@@ -163,21 +163,24 @@ def test_assistant_panel_and_lab_smoke(monkeypatch, tmp_path):
         assert snapshot['inputs'] == {'peak_torque': '30'}
         assert snapshot['results'] == ['Estimated flat-road top speed ≈ 71.3 km/h']
 
-        # Model path: streams, sends app state for "my ..." questions, shows sources.
+        # Model path sends app state and buffers chunks until final validation.
         sent = {}
         def fake_chat(messages, model, max_tokens, on_chunk=None):
             sent['messages'] = messages
-            on_chunk('Lower CdA.')
-            return 'Lower CdA.', {'model': model, 'tokens_per_s': 20.0, 'truncated': False}
+            on_chunk('partial internal-looking fragment')
+            return 'The visible result estimates 71.3 km/h.', {'model': model, 'tokens_per_s': 20.0, 'truncated': False}
         monkeypatch.setattr(llm_client, 'stream_chat', fake_chat)
         monkeypatch.setattr(rag_store, 'query', lambda q: [{'source': 'kb/aero.md#chunk-1', 'text': 'CdA matters.'}])
-        app.assistant_entry.insert(0, 'How can I increase my top speed?')
+        app.assistant_entry.insert(0, 'What does my current analysis show?')
         app._send_chat_message()
         _wait(app)
         assert '71.3 km/h' in sent['messages'][-1]['content']
         assert 'Analysis types in this app: Powertrain Sizing, Acceleration' in sent['messages'][0]['content']
         history_text = app.assistant_history.get('1.0', 'end')
-        assert 'Sources: kb/aero.md#chunk-1' in history_text and 'used current analysis' in history_text
+        assert 'The visible result estimates 71.3 km/h.' in history_text
+        assert 'partial internal-looking fragment' not in history_text
+        assert 'Sources: kb/aero.md#chunk-1' not in history_text
+        assert 'tok/s' not in history_text
 
         app._screen_snapshot = lambda: pytest.fail('generic question must not capture the screen')
         app.assistant_entry.insert(0, 'What is motor torque?')

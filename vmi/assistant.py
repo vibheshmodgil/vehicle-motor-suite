@@ -13,6 +13,7 @@ import datetime
 import json
 import queue
 import threading
+import uuid
 from pathlib import Path
 
 import customtkinter as ctk
@@ -21,7 +22,7 @@ from .theme import COLORS, FONTS
 from . import llm_client
 from . import rag_store
 
-from .assistant_core import MAX_TOKENS, build_messages, system_prompt, checked_calculation_reply, markdown_spans, small_talk_reply, summarize_line, wants_screen_context
+from .assistant_core import MAX_TOKENS, build_messages, system_prompt, checked_calculation_reply, markdown_spans, small_talk_reply, summarize_line, wants_screen_context, plan_request, action_reply, read_state_reply, checked_state_suggestions, checked_document_reply, document_evidence_limit, ground_rag_reply, normalize_model_reply, guard_unsourced_citations, guard_state_numbers
 import time
 
 CHAT_LOG_PATH = "assistant_chat_log.jsonl"
@@ -37,6 +38,7 @@ class AssistantMixin:
         self._assistant_queue = queue.Queue()
         self._assistant_busy = False
         self._conversation = []
+        self._assistant_session_id = uuid.uuid4().hex
         self._available_models = []
         self._chosen_model = ""
         try:
@@ -205,6 +207,7 @@ class AssistantMixin:
         if self._assistant_busy:
             return
         self._conversation.clear()
+        self._assistant_session_id = uuid.uuid4().hex
         self.assistant_history.configure(state="normal")
         self.assistant_history.delete("1.0", "end")
         self.assistant_history.configure(state="disabled")
@@ -217,12 +220,28 @@ class AssistantMixin:
             return {}
         analysis = self.plot_type.get()
         inputs = {}
+        # Core engineering fields remain readable when their collapsible UI
+        # sections are closed. The selection is still bounded and explicit.
+        core_fields = ("m_ref", "wheel_radius", "gear_ratio", "gear_efficiency",
+                       "crr", "cd_a", "peak_torque", "peak_power", "continuous_power",
+                       "batt_voltage", "batt_current_limit", "batt_to_shaft_eff",
+                       "wheel_inertia", "gradients", "target_speed", "max_time",
+                       "thermal_points", "wheelbase", "cg_height")
+        for name in core_fields:
+            widget = getattr(self, name, None)
+            try:
+                if widget is not None:
+                    value = str(widget.get()).strip()
+                    if value:
+                        inputs[name] = value[:80]
+            except Exception:
+                pass
         for name, widget, kind in self._scenario_widgets():
             if kind != "entry" or name == "assistant_entry" or len(inputs) >= 40:
                 continue
             try:
                 value = str(widget.get()).strip()
-                if value and widget.winfo_ismapped():
+                if value and widget.winfo_ismapped() and name not in inputs:
                     inputs[name] = value[:40]
             except Exception:
                 continue
@@ -259,7 +278,22 @@ class AssistantMixin:
             if lines:
                 plots.append(f"{axis.get_title() or 'untitled'} ({axis.get_ylabel()} vs {axis.get_xlabel()}): "
                              + "; ".join(lines))
-        return {"analysis": analysis, "inputs": inputs, "results": results, "plots": plots}
+        selectors = {}
+        for name in ("gradient_unit_combo", "output_combo", "plot_part_combo",
+                     "speed_unit_combo", "compare_std_plot_var", "range_plot_toggle"):
+            widget = getattr(self, name, None)
+            try:
+                if widget is not None:
+                    selectors[name] = str(widget.get())[:50]
+            except Exception:
+                pass
+        datasets = {}
+        for name, attr in (("drive_cycle", "dataframe"), ("motor_curve", "motor_dataframe"),
+                           ("motor_efficiency_map", "eff1_map_matrix"),
+                           ("controller_efficiency_map", "eff2_map_matrix")):
+            datasets[name] = getattr(self, attr, None) is not None
+        return {"analysis": analysis, "inputs": inputs, "selectors": selectors,
+                "datasets": datasets, "results": results, "plots": plots}
 
     def toggle_assistant_panel(self):
         if self._assistant_open:
@@ -310,12 +344,15 @@ class AssistantMixin:
         if not question:
             return
         model = self.model_picker.get().strip()
-        local_reply = small_talk_reply(question) or checked_calculation_reply(question)
+        plan = plan_request(question, self._conversation)
+        local_reply = (small_talk_reply(question) or checked_calculation_reply(question)
+                       or action_reply(plan["route"]))
         if not model and not local_reply:
             self._set_assistant_status("Choose an installed model first.")
             return
         try:
-            screen = ({} if local_reply or not wants_screen_context(question, self._conversation)
+            screen = ({} if local_reply or not (plan["route"] == "state" or
+                        wants_screen_context(question, self._conversation))
                       else self._screen_snapshot())
             analysis_types = tuple(self.plot_type.cget("values"))
         except Exception as exc:
@@ -331,13 +368,12 @@ class AssistantMixin:
             self._chosen_model = model
             self._persist_model_choices()
         self._started = time.perf_counter()
-        self._stream_text = ""
         self._stream_mark = self.assistant_history.index("end-1c")
         self._assistant_phase = "Searching documents / loading model"
         self._set_assistant_status(self._assistant_phase + "...")
         self._tick_response_timer()
         threading.Thread(target=self._chat_worker, args=(question, model, screen,
-                         list(self._conversation), analysis_types, local_reply), daemon=True).start()
+                         list(self._conversation), analysis_types, local_reply, plan), daemon=True).start()
 
     def _suggest_improvements(self):
         self.screen_toggle.select()
@@ -364,37 +400,84 @@ class AssistantMixin:
             self._set_assistant_status(f"{self._assistant_phase} • {time.perf_counter() - self._started:.1f}s elapsed")
             self.after(100, self._tick_response_timer)
 
-    def _chat_worker(self, question, model, screen, history, analysis_types, local_reply):
+    def _chat_worker(self, question, model, screen, history, analysis_types, local_reply, plan):
         started = time.perf_counter()
+        trace = [{"event": "USER", "at_s": 0.0, "input_schema": {"type": "text", "length": len(question)}},
+                 {"event": "ROUTER", "at_s": 0.0, "route": plan["route"]}]
+        if screen:
+            trace.append({"event": "TOOL_RESULT", "at_s": 0.0, "tool": "state.snapshot",
+                          "status": "ok", "input_schema": {"type": "current Tk state"},
+                          "output_status": {"input_count": len(screen.get("inputs", {}))}})
         try:
             hits = []
-            if not local_reply:
+            retrieval_error = None
+            if not local_reply and plan["route"] == "rag":
+                trace.append({"event": "TOOL_CALL", "at_s": time.perf_counter() - started,
+                              "tool": "rag.query", "input_schema": {"type": "question text"}})
                 try:
                     hits = rag_store.query(question)
                 except Exception as exc:
-                    self._assistant_queue.put(("notice", f"Document search unavailable: {exc}"))
+                    retrieval_error = exc
+                    trace.append({"event": "TOOL_RESULT", "at_s": time.perf_counter() - started,
+                                  "tool": "rag.query", "status": "error", "error": type(exc).__name__})
+                else:
+                    trace.append({"event": "TOOL_RESULT", "at_s": time.perf_counter() - started,
+                                  "tool": "rag.query", "status": "ok", "output_status": {"hits": len(hits)}})
             retrieval_s = time.perf_counter() - started
             if local_reply:
                 reply = local_reply
                 metrics = {"model": "Local calculation" if reply.startswith("**") else "Conversation",
                            "tokens_per_s": None, "truncated": False}
+            elif retrieval_error is not None:
+                reply = "Document search is unavailable right now. I can't verify a source-backed answer."
+                metrics = {"model": "Retrieval guard", "tokens_per_s": None, "truncated": False}
+            elif plan["route"] == "rag" and not hits:
+                reply = "I couldn't find that requirement in the available indexed documents. Check that the relevant file is loaded and rebuild the knowledge base."
+                metrics = {"model": "Retrieval guard", "tokens_per_s": None, "truncated": False}
+            elif plan["route"] == "rag" and document_evidence_limit(question, hits):
+                reply = document_evidence_limit(question, hits)
+                metrics = {"model": "Evidence limit", "tokens_per_s": None, "truncated": False}
+            elif plan["route"] == "rag" and checked_document_reply(question, hits):
+                reply = checked_document_reply(question, hits)
+                metrics = {"model": "Checked document comparison", "tokens_per_s": None, "truncated": False}
+            elif plan["route"] == "state" and not screen:
+                reply = "I can't see the current analysis while 'Use current analysis' is off. Turn it on and ask again."
+                metrics = {"model": "State guard", "tokens_per_s": None, "truncated": False}
+            elif plan["route"] == "state" and read_state_reply(question, screen):
+                reply = read_state_reply(question, screen)
+                metrics = {"model": "State read", "tokens_per_s": None, "truncated": False}
+            elif plan["route"] == "state" and checked_state_suggestions(question, screen):
+                reply = checked_state_suggestions(question, screen)
+                metrics = {"model": "State guidance", "tokens_per_s": None, "truncated": False}
             else:
                 messages = build_messages(question, screen, hits, history, analysis_types)
-                announced = False
-
-                def on_chunk(chunk):
-                    nonlocal announced
-                    if not announced:
-                        self._assistant_queue.put(("phase", "Generating answer"))
-                        announced = True
-                    self._assistant_queue.put(("chunk", chunk))
-                reply, metrics = llm_client.stream_chat(messages, model, MAX_TOKENS, on_chunk=on_chunk)
+                self._assistant_queue.put(("phase", "Generating answer"))
+                trace.append({"event": "MODEL", "at_s": time.perf_counter() - started,
+                              "model": model, "input_schema": {"messages": len(messages),
+                                                                 "characters": sum(len(m["content"]) for m in messages)}})
+                # The full response is validated before display. Partial model
+                # chunks can contain reasoning or tool-shaped JSON.
+                raw_reply, metrics = llm_client.stream_chat(messages, model, MAX_TOKENS,
+                                                             on_chunk=lambda _chunk: None)
+                reply = normalize_model_reply(raw_reply)
+                if plan["route"] == "rag":
+                    reply = ground_rag_reply(reply, hits, question)
+                else:
+                    reply = guard_unsourced_citations(reply)
+                    if screen and plan["route"] == "state":
+                        reply = guard_state_numbers(reply, question, screen)
             metrics.update(retrieval_s=retrieval_s, end_to_end_s=time.perf_counter() - started,
-                           sources=sorted({h["source"] for h in hits}), used_app_state=bool(screen))
+                           sources=sorted({h["source"] for h in hits}), used_app_state=bool(screen),
+                           route=plan["route"], operations=plan["operations"])
+            trace.append({"event": "FINAL_RESPONSE", "at_s": metrics["end_to_end_s"], "status": "ok",
+                          "output_status": {"length": len(reply)}})
+            metrics["trace"] = trace
             self._log_chat_exchange(question, reply, "ok", metrics)
             self._assistant_queue.put(("chat_reply", (question, reply, metrics)))
         except Exception as exc:
-            self._log_chat_exchange(question, str(exc), "error", {"model": model})
+            trace.append({"event": "FINAL_RESPONSE", "at_s": time.perf_counter() - started,
+                          "status": "error", "error": type(exc).__name__})
+            self._log_chat_exchange(question, str(exc), "error", {"model": model, "trace": trace})
             self._assistant_queue.put(("chat_error", str(exc)))
 
     def _log_chat_exchange(self, question, answer, status, metrics=None):
@@ -404,6 +487,7 @@ class AssistantMixin:
         Tk widgets touched here, so no queue hop is needed."""
         record = {
             "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+            "session_id": self._assistant_session_id,
             "question": question,
             "answer": answer,
             "status": status, "metrics": metrics or {},
@@ -448,28 +532,10 @@ class AssistantMixin:
                     self._conversation.extend([{"role": "user", "content": question},
                                                {"role": "assistant", "content": reply}])
                     self._conversation = self._conversation[-6:]
-                    rate = metrics.get("tokens_per_s")
-                    details = f"{metrics['model']} • {metrics['end_to_end_s']:.1f}s"
-                    if rate:
-                        details += f" • {rate:.0f} tok/s"
-                    if metrics.get("used_app_state"):
-                        details += " • used current analysis"
-                    if metrics.get("sources"):
-                        details += "\nSources: " + ", ".join(metrics["sources"])
                     if metrics.get("truncated"):
-                        details += "\nAnswer hit the length limit; ask it to continue."
-                    self._append_history(details, "meta")
+                        self._append_history("Answer hit the length limit; ask me to continue.", "meta")
                     self._set_assistant_status("Ready")
                     self._set_assistant_busy(False)
-                elif kind == "chunk":
-                    self._stream_text += payload
-                    self.assistant_history.configure(state="normal")
-                    self.assistant_history.delete(self._stream_mark, "end")
-                    for content, style in markdown_spans(self._stream_text):
-                        self.assistant_history.insert("end", content, style)
-                    self.assistant_history.configure(state="disabled")
-                    self.assistant_history.see("end")
-                    self._set_assistant_status(f"Generating ({time.perf_counter() - self._started:.0f}s)")
                 elif kind == "models":
                     if payload:
                         self._available_models = payload
@@ -483,8 +549,6 @@ class AssistantMixin:
                         self._append_history("No chat models installed in Ollama.", "meta")
                 elif kind == "notice":
                     self._append_history(payload, "meta")
-                    if self._assistant_busy and self._stream_mark is not None and not self._stream_text:
-                        self._stream_mark = self.assistant_history.index("end-1c")
                 elif kind == "phase":
                     self._assistant_phase = payload
                 elif kind == "chat_error":

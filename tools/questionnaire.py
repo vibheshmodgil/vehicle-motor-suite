@@ -14,6 +14,7 @@ import datetime
 import json
 import pathlib
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -23,8 +24,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.stdout.reconfigure(encoding="utf-8")
 from vmi import llm_client, rag_store  # noqa: E402
-from vmi.assistant_core import (MAX_TOKENS, build_messages, checked_calculation_reply,  # noqa: E402
-                                small_talk_reply, system_prompt, wants_screen_context)
+from vmi.assistant_core import answer_case, system_prompt  # noqa: E402
 from tools.benchmark_assistant import ANALYSIS_TYPES  # noqa: E402
 
 STYLE_FLAGS = {
@@ -55,28 +55,22 @@ def score(case, reply, sources):
 
 
 def answer(case, model):
-    """Same routing as AssistantMixin._chat_worker. Returns (reply, metrics, sources)."""
-    question = case["question"]
+    """Use the production benchmark route; retain elapsed time for reports."""
     started = time.perf_counter()
-    local = small_talk_reply(question) or checked_calculation_reply(question)
-    if local:
-        return local, {"model": "local", "retrieval_s": 0.0, "total_s": time.perf_counter() - started}, []
-    hits = rag_store.query(question)
-    retrieval_s = time.perf_counter() - started
-    screen = case.get("screen") if wants_screen_context(question) else None
-    messages = build_messages(question, screen, hits, [], ANALYSIS_TYPES)
-    reply, metrics = llm_client.stream_chat(messages, model, MAX_TOKENS)
-    metrics.update(retrieval_s=retrieval_s, total_s=time.perf_counter() - started,
-                   prompt_chars=sum(len(m["content"]) for m in messages))
-    return reply, metrics, [h["source"] for h in hits]
+    reply, metrics, sources = answer_case(case, model, ANALYSIS_TYPES)
+    metrics.setdefault("retrieval_s", 0.0)
+    metrics["total_s"] = time.perf_counter() - started
+    return reply, metrics, sources
 
 
 def run(models, cases, output):
     for model in models:
         # Free the GPU for this model, then warm up exactly like the panel does
         # (load + cache the system prompt); the cold cost is reported separately.
-        for other in models:
-            subprocess.run(["ollama", "stop", other], capture_output=True)
+        ollama_cli = shutil.which("ollama")
+        if ollama_cli:
+            for other in models:
+                subprocess.run([ollama_cli, "stop", other], capture_output=True)
         t0 = time.perf_counter()
         try:
             llm_client.warm_up(model, system_prompt(ANALYSIS_TYPES))
@@ -84,8 +78,10 @@ def run(models, cases, output):
         except llm_client.OllamaError as exc:
             print(f"{model}: warm-up failed: {exc}")
             continue
-        placement = next((" ".join(line.split()[3:6]) for line in subprocess.run(
-            ["ollama", "ps"], capture_output=True, text=True).stdout.splitlines() if line.startswith(model)), "?")
+        ps_output = (subprocess.run([ollama_cli, "ps"], capture_output=True, text=True).stdout
+                     if ollama_cli else "")
+        placement = next((" ".join(line.split()[3:6]) for line in ps_output.splitlines()
+                          if line.startswith(model)), "?")
         print(f"== {model}: cold load + system prompt {load:.1f}s, {placement}", flush=True)
         for case in cases:
             record = {"timestamp": datetime.datetime.now().isoformat(timespec="seconds"),

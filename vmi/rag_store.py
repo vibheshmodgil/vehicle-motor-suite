@@ -30,7 +30,7 @@ COLLECTION_NAME = "vmi_knowledge"
 CHUNK_WORDS = 300
 CHUNK_OVERLAP = 50
 # Bump when chunking/embedding changes: the next rebuild re-indexes everything.
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 # Cosine distance above which a chunk is treated as unrelated to the question.
 # ponytail: fixed cutoff measured on this KB (relevant 0.20-0.33, unrelated 0.334+);
 # re-measure if the embedding model changes or relevant chunks go missing.
@@ -116,6 +116,17 @@ def _chunk_text(text, chunk_words=CHUNK_WORDS, overlap=CHUNK_OVERLAP):
     ]
 
 
+def _document_chunks(path, text):
+    """Return (chunk, page) pairs; PDFs retain their source page metadata."""
+    if os.path.splitext(path)[1].lower() != ".pdf":
+        return [(chunk, None) for chunk in _chunk_text(text)]
+    from pypdf import PdfReader
+    chunks = []
+    for page_number, page in enumerate(PdfReader(path).pages, 1):
+        chunks.extend((chunk, page_number) for chunk in _chunk_text(page.extract_text() or ""))
+    return chunks
+
+
 def _load_manifest():
     if os.path.isfile(MANIFEST_PATH):
         try:
@@ -186,9 +197,17 @@ def rebuild_index(progress=None):
             digest = hashlib.sha1(text.encode("utf-8", "ignore")).hexdigest()
             if digest in seen_text or any(isinstance(v, dict) and v.get("digest") == digest
                                           for k, v in manifest.items() if k != path and os.path.isfile(k)):
+                # A changed file can become a duplicate of another file. Its
+                # old indexed chunks must be removed or stale claims survive.
+                if prev:
+                    old_ids = [f"{path}::{i}" for i in range(prev.get("n_chunks", 0))]
+                    if old_ids:
+                        collection.delete(ids=old_ids)
+                    manifest.pop(path, None)
                 continue  # identical copy of a file already indexed
             seen_text[digest] = path
-            chunks = _chunk_text(text)
+            pairs = _document_chunks(path, text)
+            chunks = [chunk for chunk, _page in pairs]
             embeddings = [_embed_document(f"{os.path.basename(path)}: {c}") for c in chunks]
         except Exception as e:
             warnings.append(f"{os.path.relpath(path, PROJECT_ROOT)}: {e}")
@@ -196,7 +215,9 @@ def rebuild_index(progress=None):
 
         if chunks:
             ids = [f"{path}::{i}" for i in range(len(chunks))]
-            metadatas = [{"source": os.path.relpath(path, PROJECT_ROOT), "chunk": i + 1} for i in range(len(chunks))]
+            metadatas = [{"source": os.path.relpath(path, PROJECT_ROOT), "chunk": i + 1,
+                          **({"page": page} if page is not None else {})}
+                         for i, (_chunk, page) in enumerate(pairs)]
             collection.upsert(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
         if prev and prev.get("n_chunks", 0) > len(chunks):
             collection.delete(ids=[f"{path}::{i}" for i in range(len(chunks), prev["n_chunks"])])
@@ -228,23 +249,35 @@ def _source_label(meta, doc_id):
             chunk = int(doc_id.rsplit("::", 1)[1]) + 1
         except (ValueError, IndexError):
             pass
-    source = meta.get("source", "unknown")
-    return source + (f"#chunk-{chunk}" if chunk is not None else "")
+    source = str(meta.get("source", "unknown")).replace("\\", "/")
+    page = meta.get("page")
+    return source + (f"#page-{page}" if page is not None else "") + (f"#chunk-{chunk}" if chunk is not None else "")
 
 
 def query(question, top_k=3, max_distance=MAX_DISTANCE):
     """Returns up to top_k {"text", "source"} chunks relevant to the question:
     chunks of any file whose name is mentioned (e.g. "U546"), then the nearest
     chunks within max_distance. Empty list when nothing is relevant."""
+    manifest = _load_manifest()
+    # A request for a named TSI must not be answered from a vaguely similar
+    # motor-testing note. The actual named document has to be indexed.
+    if re.search(r"\bTSI\b", question, re.I) and not any(
+            "tsi" in os.path.basename(path).lower() for path in manifest if path != "__version__"):
+        return []
     collection = _get_collection()
     count = collection.count()
     if count == 0:
         return []
     hits, seen = [], set()
+    terms = set(re.findall(r"[a-z0-9]{4,}", question.lower())) - {
+        "what", "which", "does", "about", "this", "that", "from", "with", "find",
+        "give", "show", "tell", "source", "document", "requirement", "motor"}
+    if "goodman" in terms:
+        terms.update({"alternating", "mean", "stress", "safety", "factor", "formula"})
     # Only product-code-like words (letters + digits, e.g. "u546") pick a file by
     # name; plain words like "torque" or "mechanical" matched unrelated files.
     words = {w for w in re.findall(r"[a-z0-9]{3,}", question.lower()) if re.search(r"\d", w)}
-    for path, entry in _load_manifest().items():
+    for path, entry in manifest.items():
         if path == "__version__" or not isinstance(entry, dict):
             continue
         stem_words = set(re.findall(r"[a-z0-9]{3,}", os.path.splitext(os.path.basename(path))[0].lower()))
@@ -253,11 +286,29 @@ def query(question, top_k=3, max_distance=MAX_DISTANCE):
             got = collection.get(ids=ids) if ids else {"ids": []}
             for doc_id, doc, meta in zip(got["ids"], got["documents"], got["metadatas"]):
                 seen.add(doc_id)
-                hits.append({"text": doc, "source": _source_label(meta, doc_id)})
-    result = collection.query(query_embeddings=[llm_client.embed("search_query: " + question)],
-                              n_results=min(top_k, count), include=["documents", "metadatas", "distances"])
+                hits.append({"text": doc, "source": _source_label(meta, doc_id), "_distance": 0.5})
+    semantic_question = (question + " alternating mean stress safety factor formula"
+                         if re.search(r"\bgoodman\b", question, re.I) else question)
+    result = collection.query(query_embeddings=[llm_client.embed("search_query: " + semantic_question)],
+                              n_results=min(max(top_k * 4, 12), count),
+                              include=["documents", "metadatas", "distances"])
     for doc_id, doc, meta, dist in zip(result["ids"][0], result["documents"][0],
                                        result["metadatas"][0], result["distances"][0]):
         if dist <= max_distance and doc_id not in seen:
-            hits.append({"text": doc, "source": _source_label(meta, doc_id)})
-    return hits[:top_k]
+            hits.append({"text": doc, "source": _source_label(meta, doc_id), "_distance": dist})
+    def rank(hit):
+        # A high-dimensional match can favor a generic formula handbook over
+        # the actual test catalogue. Rerank candidates by distinctive query
+        # terms while retaining vector distance as the tie-breaker.
+        haystack = (hit["source"] + " " + hit["text"][:1500]).lower()
+        overlap = sum(term in haystack for term in terms)
+        source_lower = hit["source"].lower()
+        if "efficiency" in terms and "_eff_" in source_lower:
+            overlap += 3
+        if {"torque", "speed"} <= terms and "_torque_speed_" in source_lower:
+            overlap += 3
+        standards_bonus = (0.5 if re.search(r"\b(?:test|testing|standard|approval|procedure)\b", question, re.I)
+                           and "/standards/" in hit["source"].replace("\\", "/").lower() else 0)
+        return (-(overlap + standards_bonus), hit["_distance"])
+    hits.sort(key=rank)
+    return [{"text": h["text"], "source": h["source"]} for h in hits[:top_k]]

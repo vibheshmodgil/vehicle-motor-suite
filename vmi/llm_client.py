@@ -84,6 +84,8 @@ def _stream_chat(messages, model, max_tokens, on_chunk, force_gpu):
                 event = json.loads(line)
                 if event.get("error"):
                     raise OllamaError(str(event["error"]))
+                if event.get("message", {}).get("tool_calls"):
+                    raise OllamaError("Model returned an unsupported tool call; no application action was executed.")
                 chunk = event.get("message", {}).get("content", "")
                 if chunk:
                     if first is None:

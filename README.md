@@ -213,8 +213,13 @@ measured comparison of seven local models.
 
 - **Use current analysis** (switch under the input box): for questions about
   *your* work ("why is my top speed low?", "is my motor enough for 20%?") the
-  assistant receives the visible inputs, the app's computed results and a
-  summary of the plotted lines.
+  assistant receives selected structured inputs (including core fields in
+  collapsed sections), computed observations, dataset presence, and a sample
+  of plotted lines. The plot sample can predate the latest input edit; press
+  **Update Plot** before asking about the graph.
+- The assistant can read and explain current inputs. It cannot change fields,
+  recalculate analyses, create plots, export files, or use a microphone from
+  chat. Use the application controls for those actions.
 - **Quick actions:** *Suggest improvements*, *Explain my plot*, *What can you do?*
 - **Documents:** answers that use your files cite them, e.g.
   `[EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx#chunk-2]`. Excel curves
@@ -224,14 +229,16 @@ measured comparison of seven local models.
   efficiency, wheel torque / tractive force, grade force and range questions
   are calculated exactly in code rather than by the model. Greetings and
   small talk are answered instantly without the model.
-- It won't invent standard clause numbers or test limits, or declare a test
-  passed or a product compliant — it asks for the source and data instead.
+- Document requests without indexed evidence report that limitation. If the
+  model omits a valid citation, the sidebar shows a short source excerpt for
+  inspection instead of presenting the generated answer as a verified claim.
+  Verify engineering and compliance decisions against the original document.
 - **⚙ → Compare models** runs any installed models on the same motor
   questions so you can review the answers and timings side by side.
 
 ### Evaluating the assistant
 
-`tests/assistant_questionnaire.json` holds 42 questions in three groups —
+`tests/assistant_questionnaire.json` holds 41 questions in three groups —
 casual conversation, motor design and control, and this software's analyses
 and parameters — each with automatic checks (required facts, forbidden
 content, word limit, expected document). Run it against any models:
@@ -245,6 +252,11 @@ retrieval time, time to first word, total time, words/s, accuracy and style.
 Every question and answer is also logged locally to `assistant_chat_log.jsonl`
 so you can review how the assistant performs over time. This file is just for
 you — it is not uploaded to GitHub (see `.gitignore`).
+
+For broader regression coverage, run `python tools/assistant_qa.py` (406
+intent and safety cases), `python tools/assistant_rag_probe.py` (40 retrieval
+questions), and `python -m pytest`. The architecture, tested limits, and
+manual review procedure are in [`docs/assistant_qa_report.md`](docs/assistant_qa_report.md).
 
 ---
 
