@@ -1,0 +1,29 @@
+{
+  "questions": 9,
+  "successful": 9,
+  "rule_score_mean": 0.9537037037037037,
+  "end_to_end_latency_s": {
+    "n": 9,
+    "mean": 0.10538028888893475,
+    "median": 0.13826609999978245,
+    "p90": 0.21109300000007353,
+    "p95": 0.233426800000052
+  },
+  "ttft_s": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "p90": null,
+    "p95": null
+  },
+  "llm_latency_s": {
+    "n": 9,
+    "mean": 0,
+    "median": 0,
+    "p90": 0.0,
+    "p95": 0.0
+  },
+  "failures": {
+    "PROMPT_FAILURE": 2
+  }
+}

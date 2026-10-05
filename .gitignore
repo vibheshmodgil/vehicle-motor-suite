@@ -52,3 +52,11 @@ motor.jpg
 assistant_settings.json
 assistant_settings.tmp
 assistant_benchmark_cases.json
+
+# --- Assistant benchmark raw traces ---
+# Rows embed full retrieved excerpts of the (ignored, possibly proprietary)
+# knowledge_base documents; keep them local. Summaries/comparisons are kept.
+evaluation/results/**/*.jsonl
+evaluation/results/**/*.incomplete
+evaluation/results/retrieval_*.json
+evaluation/results/*.log

@@ -1,0 +1,2119 @@
+[
+  {
+    "question_id": "H001",
+    "category": "powertrain_direct",
+    "question": "How fast can this vehicle go on level ground according to the model?",
+    "expected_answer": "The app estimates 74.6 km/h on a flat road.",
+    "expected_numerical_values": [
+      {
+        "value": 74.56574837246414,
+        "unit": "km/h",
+        "tolerance_abs": 1.491314967449283
+      }
+    ],
+    "required_facts": [
+      "flat-road",
+      "top speed"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q001"
+  },
+  {
+    "question_id": "H002",
+    "category": "powertrain_direct",
+    "question": "whats the max speed i can hit",
+    "expected_answer": "About 74.6 km/h, based on the current peak capability curve.",
+    "expected_numerical_values": [
+      {
+        "value": 74.56574837246414,
+        "unit": "km/h",
+        "tolerance_abs": 1.491314967449283
+      }
+    ],
+    "required_facts": [
+      "top speed"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q002"
+  },
+  {
+    "question_id": "H003",
+    "category": "powertrain_direct",
+    "question": "What's the steepest slope this setup can pull away on?",
+    "expected_answer": "33.0% with the peak curve.",
+    "expected_numerical_values": [
+      {
+        "value": 33.0,
+        "unit": "%",
+        "tolerance_abs": 0.66
+      }
+    ],
+    "required_facts": [
+      "startable",
+      "peak"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q003"
+  },
+  {
+    "question_id": "H004",
+    "category": "powertrain_direct",
+    "question": "Will it manage a hill start on a 20 percent incline?",
+    "expected_answer": "Yes. The app's peak-curve startable limit is 33.0%; sustained climbing is not verified.",
+    "expected_numerical_values": [
+      {
+        "value": 33.0,
+        "unit": "%",
+        "tolerance_abs": 0.66
+      }
+    ],
+    "required_facts": [
+      "startable",
+      "sustained"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q004"
+  },
+  {
+    "question_id": "H005",
+    "category": "powertrain_direct",
+    "question": "Which peak torque value did I enter for the motor?",
+    "expected_answer": "30 N m.",
+    "expected_numerical_values": [
+      {
+        "value": 30,
+        "unit": "N m",
+        "tolerance_abs": 0.6
+      }
+    ],
+    "required_facts": [
+      "peak",
+      "torque"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q005"
+  },
+  {
+    "question_id": "H006",
+    "category": "powertrain_direct",
+    "question": "How much peak power is the motor set to?",
+    "expected_answer": "4.4 kW.",
+    "expected_numerical_values": [
+      {
+        "value": 4.4,
+        "unit": "kW",
+        "tolerance_abs": 0.08800000000000001
+      }
+    ],
+    "required_facts": [
+      "peak",
+      "power"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q006"
+  },
+  {
+    "question_id": "H007",
+    "category": "powertrain_direct",
+    "question": "What rated (continuous) power is entered for the motor?",
+    "expected_answer": "3.0 kW.",
+    "expected_numerical_values": [
+      {
+        "value": 3,
+        "unit": "kW",
+        "tolerance_abs": 0.06
+      }
+    ],
+    "required_facts": [
+      "continuous",
+      "power"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q007"
+  },
+  {
+    "question_id": "H008",
+    "category": "powertrain_direct",
+    "question": "How much torque reaches the wheel when pulling away, using the peak curve?",
+    "expected_answer": "228 N m from 30 N m × 8 × 0.95.",
+    "expected_numerical_values": [
+      {
+        "value": 228,
+        "unit": "N m",
+        "tolerance_abs": 4.5600000000000005
+      }
+    ],
+    "required_facts": [
+      "wheel",
+      "torque"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q008"
+  },
+  {
+    "question_id": "H009",
+    "category": "powertrain_direct",
+    "question": "How much traction force do I get from standstill?",
+    "expected_answer": "Approximately 814.3 N at the 0.28 m wheel radius.",
+    "expected_numerical_values": [
+      {
+        "value": 814.2857142857142,
+        "unit": "N",
+        "tolerance_abs": 16.285714285714285
+      }
+    ],
+    "required_facts": [
+      "force"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q009"
+  },
+  {
+    "question_id": "H010",
+    "category": "powertrain_direct",
+    "question": "Where in motor rpm does the peak envelope switch from constant torque to constant power?",
+    "expected_answer": "About 1400.6 rpm, from peak power divided by peak torque.",
+    "expected_numerical_values": [
+      {
+        "value": 1400.563499208679,
+        "unit": "rpm",
+        "tolerance_abs": 28.011269984173584
+      }
+    ],
+    "required_facts": [
+      "base",
+      "power"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q010"
+  },
+  {
+    "question_id": "H011",
+    "category": "powertrain_direct",
+    "question": "Which reduction ratio is entered?",
+    "expected_answer": "8:1 reduction.",
+    "expected_numerical_values": [
+      {
+        "value": 8,
+        "unit": "ratio",
+        "tolerance_abs": 0.16
+      }
+    ],
+    "required_facts": [
+      "gear"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q011"
+  },
+  {
+    "question_id": "H012",
+    "category": "powertrain_direct",
+    "question": "How big is the wheel radius in the inputs?",
+    "expected_answer": "0.28 m.",
+    "expected_numerical_values": [
+      {
+        "value": 0.28,
+        "unit": "m",
+        "tolerance_abs": 0.02
+      }
+    ],
+    "required_facts": [
+      "wheel",
+      "radius"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q012"
+  },
+  {
+    "question_id": "H013",
+    "category": "powertrain_direct",
+    "question": "What Crr value is the model using?",
+    "expected_answer": "Crr is 0.018.",
+    "expected_numerical_values": [
+      {
+        "value": 0.018,
+        "unit": "dimensionless",
+        "tolerance_abs": 0.02
+      }
+    ],
+    "required_facts": [
+      "Crr"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q013"
+  },
+  {
+    "question_id": "H014",
+    "category": "powertrain_direct",
+    "question": "What CdA value is set?",
+    "expected_answer": "CdA is 0.6 m².",
+    "expected_numerical_values": [
+      {
+        "value": 0.6,
+        "unit": "m²",
+        "tolerance_abs": 0.02
+      }
+    ],
+    "required_facts": [
+      "CdA"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q014"
+  },
+  {
+    "question_id": "H015",
+    "category": "acceleration_direct",
+    "question": "How long does the report say it takes to reach 60 km/h from rest?",
+    "expected_answer": "About 13.05 s.",
+    "expected_numerical_values": [
+      {
+        "value": 13.05000000000005,
+        "unit": "s",
+        "tolerance_abs": 0.261000000000001
+      }
+    ],
+    "required_facts": [
+      "0",
+      "60"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py:plot_vehicle_max_speed_vs_time; vmi/calc_ext.py:simulate_acceleration",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q015"
+  },
+  {
+    "question_id": "H016",
+    "category": "acceleration_direct",
+    "question": "0-60 time?",
+    "expected_answer": "About 13.1 seconds.",
+    "expected_numerical_values": [
+      {
+        "value": 13.05000000000005,
+        "unit": "s",
+        "tolerance_abs": 0.261000000000001
+      }
+    ],
+    "required_facts": [
+      "60"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py:plot_vehicle_max_speed_vs_time; vmi/calc_ext.py:simulate_acceleration",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q016"
+  },
+  {
+    "question_id": "H017",
+    "category": "acceleration_direct",
+    "question": "Reading the acceleration graph, how many seconds to 60 km/h?",
+    "expected_answer": "About 13.062 s.",
+    "expected_numerical_values": [
+      {
+        "value": 13.062,
+        "unit": "s",
+        "tolerance_abs": 0.26123999999999997
+      }
+    ],
+    "required_facts": [
+      "60"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py:plot_vehicle_max_speed_vs_time; vmi/calc_ext.py:simulate_acceleration",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q017"
+  },
+  {
+    "question_id": "H018",
+    "category": "acceleration_direct",
+    "question": "Where do tractive force and resistance cross in the acceleration analysis, speed-wise?",
+    "expected_answer": "About 74.6 km/h.",
+    "expected_numerical_values": [
+      {
+        "value": 74.56574799734051,
+        "unit": "km/h",
+        "tolerance_abs": 1.4913149599468103
+      }
+    ],
+    "required_facts": [
+      "top speed"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py:plot_vehicle_max_speed_vs_time; vmi/calc_ext.py:simulate_acceleration",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q018"
+  },
+  {
+    "question_id": "H019",
+    "category": "acceleration_direct",
+    "question": "After a full minute of the sim, what speed is the vehicle doing?",
+    "expected_answer": "About 74.4 km/h.",
+    "expected_numerical_values": [
+      {
+        "value": 74.43492524728846,
+        "unit": "km/h",
+        "tolerance_abs": 1.4886985049457693
+      }
+    ],
+    "required_facts": [
+      "60"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py:plot_vehicle_max_speed_vs_time; vmi/calc_ext.py:simulate_acceleration",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q019"
+  },
+  {
+    "question_id": "H020",
+    "category": "acceleration_direct",
+    "question": "At what time does the acceleration curve level off at top speed?",
+    "expected_answer": "At about 49.9 s under its 0.01 m/s² threshold.",
+    "expected_numerical_values": [
+      {
+        "value": 49.859,
+        "unit": "s",
+        "tolerance_abs": 0.9971800000000001
+      }
+    ],
+    "required_facts": [
+      "settle"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py:plot_vehicle_max_speed_vs_time; vmi/calc_ext.py:simulate_acceleration",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q020"
+  },
+  {
+    "question_id": "H021",
+    "category": "acceleration_direct",
+    "question": "What's the target speed set for the acceleration test?",
+    "expected_answer": "60 km/h.",
+    "expected_numerical_values": [
+      {
+        "value": 60,
+        "unit": "km/h",
+        "tolerance_abs": 1.2
+      }
+    ],
+    "required_facts": [
+      "target"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py:plot_vehicle_max_speed_vs_time; vmi/calc_ext.py:simulate_acceleration",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q021"
+  },
+  {
+    "question_id": "H022",
+    "category": "acceleration_direct",
+    "question": "What max simulation time is set for acceleration?",
+    "expected_answer": "60 seconds.",
+    "expected_numerical_values": [
+      {
+        "value": 60,
+        "unit": "s",
+        "tolerance_abs": 1.2
+      }
+    ],
+    "required_facts": [
+      "simulation"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py:plot_vehicle_max_speed_vs_time; vmi/calc_ext.py:simulate_acceleration",
+    "difficulty": "easy",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q022"
+  },
+  {
+    "question_id": "H023",
+    "category": "engineering_explanation",
+    "question": "Why does the vehicle pull less hard once the motor passes base speed?",
+    "expected_answer": "Above base speed, the theoretical motor curve holds power constant and torque falls as P/ω; available wheel force falls.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "power",
+      "torque",
+      "speed"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q023"
+  },
+  {
+    "question_id": "H024",
+    "category": "engineering_explanation",
+    "question": "How is the resistive force on level ground computed in the tool?",
+    "expected_answer": "It adds rolling force m g Crr and aerodynamic drag 0.5 ρ CdA v².",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "rolling",
+      "drag"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/parametric.py:_compute_resistive_force",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q024"
+  },
+  {
+    "question_id": "H025",
+    "category": "engineering_explanation",
+    "question": "How does a bigger drag area reduce the top speed?",
+    "expected_answer": "A larger CdA raises drag quadratically with speed, so force balance occurs sooner.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "drag",
+      "speed"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q025"
+  },
+  {
+    "question_id": "H026",
+    "category": "engineering_explanation",
+    "question": "Why would adding rotating wheel inertia slow down the acceleration?",
+    "expected_answer": "It adds J/r² to inertial mass, reducing acceleration for the same net force.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "inertia",
+      "mass"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/calc_ext.py:effective_mass",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q026"
+  },
+  {
+    "question_id": "H027",
+    "category": "engineering_explanation",
+    "question": "In this model, does wheel moment of inertia alter the steady top speed on a flat road?",
+    "expected_answer": "No. It changes the acceleration inertial term but not steady force balance.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "no",
+      "acceleration"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/calc_ext.py:effective_mass",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q027"
+  },
+  {
+    "question_id": "H028",
+    "category": "engineering_explanation",
+    "question": "If I fit a smaller wheel, what happens to the force at launch?",
+    "expected_answer": "For fixed wheel torque, force rises because F = T/r; it also raises motor RPM at a given road speed.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "force",
+      "rpm"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q028"
+  },
+  {
+    "question_id": "H029",
+    "category": "engineering_explanation",
+    "question": "Which forces have to balance for the predicted max speed?",
+    "expected_answer": "The first speed where available wheel force falls to road-load force.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "force",
+      "road"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/parametric.py:_estimate_top_speed",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q029"
+  },
+  {
+    "question_id": "H030",
+    "category": "engineering_explanation",
+    "question": "What does 'max startable gradient' mean in this tool?",
+    "expected_answer": "The highest searched grade with any speed at which peak wheel force meets resistance. It is not a thermal or traction guarantee.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "grade",
+      "peak"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/parametric.py:_estimate_max_gradability",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q030"
+  },
+  {
+    "question_id": "H031",
+    "category": "engineering_explanation",
+    "question": "More peak torque helps take-off, so why doesn't it help much at high speed?",
+    "expected_answer": "Peak torque raises the low-speed region; above base speed the fixed power limit sets torque.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "torque",
+      "power"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q031"
+  },
+  {
+    "question_id": "H032",
+    "category": "engineering_explanation",
+    "question": "Why does extra peak power help acceleration at higher speeds?",
+    "expected_answer": "Above base speed, more available shaft power yields more torque and wheel force at a given RPM.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "power",
+      "force"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q032"
+  },
+  {
+    "question_id": "H033",
+    "category": "engineering_explanation",
+    "question": "Does the acceleration plot compute distance travelled over time?",
+    "expected_answer": "No. It plots speed versus time and calculates target time and final speed; distance is not integrated in this view.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "no",
+      "speed",
+      "time"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py:plot_vehicle_max_speed_vs_time; vmi/calc_ext.py:simulate_acceleration",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q033"
+  },
+  {
+    "question_id": "H034",
+    "category": "engineering_explanation",
+    "question": "Is the top speed shown here from an actual road test?",
+    "expected_answer": "No. It is a model estimate from the configured capability curve and road resistance.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "estimate",
+      "force"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q034"
+  },
+  {
+    "question_id": "H035",
+    "category": "motor",
+    "question": "How does the app construct the theoretical torque vs speed envelope of the motor?",
+    "expected_answer": "Peak torque is flat up to P/T base speed, then torque is P/ω.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "peak torque",
+      "power"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/torque_force.py:plot_torque_graph",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q035"
+  },
+  {
+    "question_id": "H036",
+    "category": "motor",
+    "question": "What limits the rated/continuous torque curve?",
+    "expected_answer": "It is the smaller of peak torque divided by the peak-to-rated ratio and continuous power divided by ω.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "ratio",
+      "continuous power"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/torque_force.py:plot_torque_graph",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q036"
+  },
+  {
+    "question_id": "H037",
+    "category": "motor",
+    "question": "If I upload a torque-speed file for the motor, how does the acceleration calc change?",
+    "expected_answer": "The uploaded RPM–torque curve replaces the theoretical envelope, with interpolation of torque at motor RPM.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "uploaded",
+      "interpolat"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/torque_force.py:_accel_wheel_force_fn",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q037"
+  },
+  {
+    "question_id": "H038",
+    "category": "motor",
+    "question": "At 60 km/h how many rpm is the motor turning with this gear ratio and wheel?",
+    "expected_answer": "Approximately 4547 rpm from wheel speed times the 8:1 ratio.",
+    "expected_numerical_values": [
+      {
+        "value": 4547.284088339867,
+        "unit": "rpm",
+        "tolerance_abs": 90.946
+      }
+    ],
+    "required_facts": [
+      "rpm",
+      "gear"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/torque_force.py:_accel_wheel_force_fn",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q038"
+  },
+  {
+    "question_id": "H039",
+    "category": "motor",
+    "question": "Is there a max motor rpm cut-off in Powertrain Sizing?",
+    "expected_answer": "No explicit maximum-RPM input or cutoff is applied in this tab.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "no",
+      "rpm"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/torque_force.py:plot_torque_graph",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q039"
+  },
+  {
+    "question_id": "H040",
+    "category": "motor",
+    "question": "What's the peak to rated torque ratio used for?",
+    "expected_answer": "It sets the continuous torque plateau as peak torque divided by that ratio.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "continuous",
+      "ratio"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/torque_force.py:plot_torque_graph",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q040"
+  },
+  {
+    "question_id": "H041",
+    "category": "motor",
+    "question": "What columns must the motor data upload file have?",
+    "expected_answer": "A motor speed and motor torque column; the app normalizes them as motor_speed and motor_torque.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "speed",
+      "torque"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/data_io.py:load_motor_data_excel",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q041"
+  },
+  {
+    "question_id": "H042",
+    "category": "motor_controller",
+    "question": "How does the battery DC current limit cap the motor torque?",
+    "expected_answer": "The shaft-power ceiling is voltage times DC current limit times motor/controller efficiency; torque is clipped at each RPM.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "voltage",
+      "current",
+      "efficien"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/calc_ext.py:battery_power_cap_w; vmi/ui_helpers.py:cap_torque_to_battery",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q042"
+  },
+  {
+    "question_id": "H043",
+    "category": "motor_controller",
+    "question": "With efficiency maps loaded, which efficiency does the battery limit use?",
+    "expected_answer": "It uses the motor and controller efficiency maps at the operating point; the constant fallback applies without maps.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "motor",
+      "controller",
+      "map"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/ui_helpers.py:_battery_eta_fn",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q043"
+  },
+  {
+    "question_id": "H044",
+    "category": "motor_controller",
+    "question": "Can I set the controller phase current limit separately in Powertrain Sizing?",
+    "expected_answer": "No. The tab has an optional battery DC current limit, not a separate controller phase-current limit.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "no",
+      "DC",
+      "phase"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/app.py:Motor Performance Parameters",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q044"
+  },
+  {
+    "question_id": "H045",
+    "category": "motor_controller",
+    "question": "Could the battery DC power limit change the top speed result?",
+    "expected_answer": "Yes, if it clips available shaft torque/power near the force crossing.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "yes",
+      "cap"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/parametric.py:_compute_available_wheel_force",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q045"
+  },
+  {
+    "question_id": "H046",
+    "category": "motor_controller",
+    "question": "Does the acceleration plot model controller thermal derating?",
+    "expected_answer": "No controller thermal derating curve is applied there.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "no",
+      "thermal"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/torque_force.py:_accel_wheel_force_fn",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q046"
+  },
+  {
+    "question_id": "H047",
+    "category": "motor_controller",
+    "question": "From these inputs, can the tool tell if the controller phase current is safe?",
+    "expected_answer": "No. It needs phase-current and controller ratings/test evidence; the optional DC current field alone is insufficient.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "no",
+      "phase",
+      "rating"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "vmi/app.py:Motor Performance Parameters",
+    "difficulty": "medium",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q047"
+  },
+  {
+    "question_id": "H048",
+    "category": "cross_analysis",
+    "question": "With a taller reduction ratio, how do launch force and motor rpm at a given road speed change?",
+    "expected_answer": "Launch force and motor RPM both rise, until another cap changes the result.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "force",
+      "rpm",
+      "rise"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "hard",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "reasoning",
+    "source_question_id": "Q048"
+  },
+  {
+    "question_id": "H049",
+    "category": "cross_analysis",
+    "question": "Why does a higher reduction help hill climbing but hurt top-end performance?",
+    "expected_answer": "It multiplies low-speed wheel torque but moves the motor farther along its falling-torque/high-RPM envelope at a given vehicle speed.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "wheel torque",
+      "rpm",
+      "high"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "hard",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "reasoning",
+    "source_question_id": "Q049"
+  },
+  {
+    "question_id": "H050",
+    "category": "cross_analysis",
+    "question": "If the vehicle gets heavier, does that affect acceleration, steady top speed, or both?",
+    "expected_answer": "Acceleration worsens because inertial mass and rolling/grade load rise; flat-road top speed can also fall because rolling resistance rises.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "acceleration",
+      "rolling",
+      "top speed"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "hard",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "reasoning",
+    "source_question_id": "Q050"
+  },
+  {
+    "question_id": "H051",
+    "category": "cross_analysis",
+    "question": "If I cut CdA but keep the same motor power, which part of the run improves the most?",
+    "expected_answer": "Higher speeds benefit most because aerodynamic drag grows with v².",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "high",
+      "drag"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "hard",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "reasoning",
+    "source_question_id": "Q051"
+  },
+  {
+    "question_id": "H052",
+    "category": "cross_analysis",
+    "question": "Can more peak torque leave the 0-60 time almost the same if peak power doesn't change?",
+    "expected_answer": "Yes. Raising peak torque moves base speed lower; power-limited portions of 0–60 may stay similar.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "yes",
+      "base",
+      "power"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "hard",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "reasoning",
+    "source_question_id": "Q052"
+  },
+  {
+    "question_id": "H053",
+    "category": "cross_analysis",
+    "question": "Why would an uploaded motor curve change both acceleration and top speed?",
+    "expected_answer": "Both use available wheel force derived from the uploaded RPM–torque curve, compared with road load.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "curve",
+      "force",
+      "road"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "implemented_rule",
+    "relevant_document_or_chunk": "application: vmi/torque_force.py; vmi/parametric.py; evaluation/reference_case.py",
+    "difficulty": "hard",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "reasoning",
+    "source_question_id": "Q053"
+  },
+  {
+    "question_id": "H054",
+    "category": "rag_document",
+    "question": "How does the motor testing doc say to measure winding resistance?",
+    "expected_answer": "Four-wire Kelvin measurement at controlled temperature, corrected to a reference temperature.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "Kelvin",
+      "temperature"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q054"
+  },
+  {
+    "question_id": "H055",
+    "category": "rag_document",
+    "question": "What should be measured for the torque-speed curve per the testing document?",
+    "expected_answer": "A dynamometer sweep across speed and torque points under controlled temperature.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "dynamometer",
+      "temperature"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q055"
+  },
+  {
+    "question_id": "H056",
+    "category": "rag_document",
+    "question": "What's the test method for the efficiency map in the motor test doc?",
+    "expected_answer": "Grid testing over speed and torque, with motoring and regeneration if supported.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "speed",
+      "torque",
+      "regen"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q056"
+  },
+  {
+    "question_id": "H057",
+    "category": "rag_document",
+    "question": "Which test in the motor testing document verifies peak and continuous power?",
+    "expected_answer": "Rated thermal soak followed by peak-current or overload windows per specification.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "thermal",
+      "peak",
+      "specification"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q057"
+  },
+  {
+    "question_id": "H058",
+    "category": "rag_document",
+    "question": "What does the test doc say about temperature rise at rated duty?",
+    "expected_answer": "Thermal soak on a dynamometer until steady state, measuring winding, magnet, bearing and housing temperatures.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "thermal soak",
+      "steady",
+      "temperature"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q058"
+  },
+  {
+    "question_id": "H059",
+    "category": "rag_document",
+    "question": "In the testing document, what is measured in the overspeed / field weakening test?",
+    "expected_answer": "Current, voltage and torque at high speed.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "current",
+      "voltage",
+      "torque"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q059"
+  },
+  {
+    "question_id": "H060",
+    "category": "rag_document",
+    "question": "How does the test plan validate the controller's over-current protection?",
+    "expected_answer": "Controlled fault injection and measurement of protection reaction timing.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "fault",
+      "timing"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q060"
+  },
+  {
+    "question_id": "H061",
+    "category": "rag_document",
+    "question": "What does the testing doc say about checking controller over- and under-voltage?",
+    "expected_answer": "Voltage sweep and fault logging.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "voltage sweep",
+      "fault"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q061"
+  },
+  {
+    "question_id": "H062",
+    "category": "rag_document",
+    "question": "List the hub motor specific test priorities from section 5.1.",
+    "expected_answer": "IP, salt spray, mud splash, wheel-end shock, bearing endurance, tyre/rim interface and wheel balance.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "IP",
+      "salt",
+      "bearing",
+      "wheel"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q062"
+  },
+  {
+    "question_id": "H063",
+    "category": "rag_document",
+    "question": "What extra test focus does section 5.2 put on mid-mount motors?",
+    "expected_answer": "Gearbox efficiency, lubricant ageing, backlash, coupling fatigue, controller packaging, ducting and frame vibration.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "gearbox",
+      "coupling",
+      "vibration"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q063"
+  },
+  {
+    "question_id": "H064",
+    "category": "rag_document",
+    "question": "Which standard does the testing document cite for motor ingress protection?",
+    "expected_answer": "IS/IEC 60529.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "60529"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q064"
+  },
+  {
+    "question_id": "H065",
+    "category": "rag_document",
+    "question": "Which Indian standard in the testing doc covers EMC of the controller and harness?",
+    "expected_answer": "AIS-004 (Part 3).",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "AIS-004",
+      "Part 3"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q065"
+  },
+  {
+    "question_id": "H066",
+    "category": "rag_document",
+    "question": "Which standard family in the testing document covers rotating machine rating and performance?",
+    "expected_answer": "IS/IEC 60034.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "60034"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q066"
+  },
+  {
+    "question_id": "H067",
+    "category": "rag_document",
+    "question": "Which end-of-line test catches rotor rub, bearing drag or winding faults?",
+    "expected_answer": "A no-load current screen at fixed speed against limits.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "no-load current",
+      "fixed speed"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q067"
+  },
+  {
+    "question_id": "H068",
+    "category": "rag_document",
+    "question": "What inputs and measurements must the test-record schema in the testing document capture?",
+    "expected_answer": "Inputs include voltage, current, speed, torque, temperature and load profile; measurements record what was observed.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "voltage",
+      "current",
+      "speed",
+      "torque"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q068"
+  },
+  {
+    "question_id": "H069",
+    "category": "rag_document",
+    "question": "How do the torque-speed test setup and the efficiency map test setup differ in the testing doc?",
+    "expected_answer": "Both use speed and torque points; the torque-speed curve is a dynamometer sweep, while the efficiency map is a grid with input/output power and possible regeneration.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "dynamometer",
+      "grid",
+      "power"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "hard",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q069"
+  },
+  {
+    "question_id": "H070",
+    "category": "rag_document",
+    "question": "For a hub motor, which mechanical and environmental tests matter most?",
+    "expected_answer": "Wheel hub durability and bearing endurance, plus ingress, salt-spray and mud exposure.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "bearing",
+      "ingress",
+      "salt"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "hard",
+    "reasoning_required": true,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q070"
+  },
+  {
+    "question_id": "H071",
+    "category": "rag_document",
+    "question": "What's the max torque in the U546 torque speed data?",
+    "expected_answer": "120 N m, maintained from 0 through 200 rpm in the file.",
+    "expected_numerical_values": [
+      {
+        "value": 120,
+        "unit": "N m",
+        "tolerance_abs": 0.1
+      }
+    ],
+    "required_facts": [
+      "120",
+      "200"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/datasheets/U546_torque_speed_map.xlsx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q071"
+  },
+  {
+    "question_id": "H072",
+    "category": "rag_document",
+    "question": "At which rpm does the U546 reach its highest power?",
+    "expected_answer": "2513.274 W at 200 rpm.",
+    "expected_numerical_values": [
+      {
+        "value": 200,
+        "unit": "rpm",
+        "tolerance_abs": 1.0
+      }
+    ],
+    "required_facts": [
+      "200",
+      "2513"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/datasheets/U546_torque_speed_map.xlsx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q072"
+  },
+  {
+    "question_id": "H073",
+    "category": "rag_document",
+    "question": "What torque does the U546 file give at 900 rpm?",
+    "expected_answer": "26.5258 N m.",
+    "expected_numerical_values": [
+      {
+        "value": 26.52582385,
+        "unit": "N m",
+        "tolerance_abs": 0.2
+      }
+    ],
+    "required_facts": [
+      "900",
+      "26.5"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/datasheets/U546_torque_speed_map.xlsx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q073"
+  },
+  {
+    "question_id": "H074",
+    "category": "rag_document",
+    "question": "What is the peak efficiency in the U546 efficiency map and where does it occur?",
+    "expected_answer": "0.8966 (89.66%) at 35 N m and 500 rpm.",
+    "expected_numerical_values": [
+      {
+        "value": 89.66,
+        "unit": "%",
+        "tolerance_abs": 0.1
+      }
+    ],
+    "required_facts": [
+      "89.66",
+      "35",
+      "500"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "document",
+    "relevant_document_or_chunk": "knowledge_base/datasheets/U546_eff_map.xlsx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": null,
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q074"
+  },
+  {
+    "question_id": "H075",
+    "category": "unavailable",
+    "question": "What's the homologated top speed of this vehicle?",
+    "expected_answer": "No certification or road-test result is available; the app only estimates speed.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "not|no|cannot|unavailable|insufficient"
+    ],
+    "forbidden_claims": [
+      "certified",
+      "passed",
+      "compliant"
+    ],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q075"
+  },
+  {
+    "question_id": "H076",
+    "category": "unavailable",
+    "question": "What is the maker's safe max rpm for this motor?",
+    "expected_answer": "No manufacturer maximum-RPM rating is loaded for the reference vehicle.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "not|no|cannot|unavailable|insufficient"
+    ],
+    "forbidden_claims": [
+      "certified",
+      "passed",
+      "compliant"
+    ],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q076"
+  },
+  {
+    "question_id": "H077",
+    "category": "unavailable",
+    "question": "At what temperature does this controller start derating?",
+    "expected_answer": "No controller thermal derating threshold is provided.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "not|no|cannot|unavailable|insufficient"
+    ],
+    "forbidden_claims": [
+      "certified",
+      "passed",
+      "compliant"
+    ],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q077"
+  },
+  {
+    "question_id": "H078",
+    "category": "unavailable",
+    "question": "What is the peak phase current of the controller?",
+    "expected_answer": "The current vehicle state only has an optional battery DC current limit, not a controller phase-current rating.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "not|no|cannot|unavailable|insufficient"
+    ],
+    "forbidden_claims": [
+      "certified",
+      "passed",
+      "compliant"
+    ],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q078"
+  },
+  {
+    "question_id": "H079",
+    "category": "unavailable",
+    "question": "What distance does the vehicle cover while going from 0 to 60?",
+    "expected_answer": "The current acceleration output does not integrate distance; a verified distance result is unavailable.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "not|no|cannot|unavailable|insufficient"
+    ],
+    "forbidden_claims": [
+      "certified",
+      "passed",
+      "compliant"
+    ],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q079"
+  },
+  {
+    "question_id": "H080",
+    "category": "unavailable",
+    "question": "What pass/fail criterion does the testing doc give for IP67 on this motor?",
+    "expected_answer": "The document lists ingress testing and IS/IEC 60529 but gives no product-specific IP67 acceptance criterion.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "not|no|cannot|unavailable|insufficient"
+    ],
+    "forbidden_claims": [
+      "certified",
+      "passed",
+      "compliant"
+    ],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q080"
+  },
+  {
+    "question_id": "H081",
+    "category": "unavailable",
+    "question": "Did the U546 pass the overspeed test in the document?",
+    "expected_answer": "The indexed data has no U546 overspeed test result.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "not|no|cannot|unavailable|insufficient"
+    ],
+    "forbidden_claims": [
+      "certified",
+      "passed",
+      "compliant"
+    ],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q081"
+  },
+  {
+    "question_id": "H082",
+    "category": "unavailable",
+    "question": "Is this vehicle AIS-156 compliant?",
+    "expected_answer": "Approval cannot be determined from the available app inputs and test catalogue; program-specific evidence is needed.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "not|no|cannot|unavailable|insufficient"
+    ],
+    "forbidden_claims": [
+      "certified",
+      "passed",
+      "compliant"
+    ],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "knowledge_base/standards/EV_Motor_Testing_India_2W_3W_Hub_MidMount.docx",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q082"
+  },
+  {
+    "question_id": "H083",
+    "category": "ambiguous",
+    "question": "why is it so slow",
+    "expected_answer": "Ask which result or operating point is low, then inspect the current top-speed, grade or acceleration outputs.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "which|what|clarif|mean|result|parameter"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q083"
+  },
+  {
+    "question_id": "H084",
+    "category": "ambiguous",
+    "question": "is the motor the bottleneck?",
+    "expected_answer": "Ask what 'it' refers to, or use the preceding turn; current motor/controller limits are insufficient for a definitive component diagnosis.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "which|what|clarif|mean|result|parameter"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q084"
+  },
+  {
+    "question_id": "H085",
+    "category": "ambiguous",
+    "question": "should i make it bigger?",
+    "expected_answer": "Clarify which parameter, then explain the expected tradeoff rather than assuming a change.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "which|what|clarif|mean|result|parameter"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "unavailable",
+    "relevant_document_or_chunk": "",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": "State that the available data is insufficient; identify the missing value without inventing it.",
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "both",
+    "source_question_id": "Q085"
+  },
+  {
+    "question_id": "H086",
+    "category": "conversation",
+    "question": "how fast does it go?",
+    "expected_answer": "About 74.6 km/h.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "74.6"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [],
+    "model_role": "fast",
+    "source_question_id": "Q086"
+  },
+  {
+    "question_id": "H087",
+    "category": "conversation",
+    "question": "How come it's so low?",
+    "expected_answer": "Road load meets the current peak wheel-force curve around 74.6 km/h; CdA, power and gearing all warrant review.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "road",
+      "force"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [
+      {
+        "role": "user",
+        "content": "What's my top speed?"
+      },
+      {
+        "role": "assistant",
+        "content": "About 74.6 km/h."
+      }
+    ],
+    "model_role": "fast",
+    "source_question_id": "Q087"
+  },
+  {
+    "question_id": "H088",
+    "category": "conversation",
+    "question": "And if I change the gear ratio?",
+    "expected_answer": "A higher reduction ratio raises low-speed wheel force but raises motor RPM at a given road speed; rerun for a quantitative change.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "gear",
+      "rpm"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [
+      {
+        "role": "user",
+        "content": "What's my top speed?"
+      },
+      {
+        "role": "assistant",
+        "content": "About 74.6 km/h."
+      }
+    ],
+    "model_role": "fast",
+    "source_question_id": "Q088"
+  },
+  {
+    "question_id": "H089",
+    "category": "conversation",
+    "question": "What does that do to acceleration?",
+    "expected_answer": "Higher reduction can improve launch acceleration; the high-speed effect depends on the power-limited envelope.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "acceleration",
+      "launch"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [
+      {
+        "role": "user",
+        "content": "What if I raise the gear ratio?"
+      },
+      {
+        "role": "assistant",
+        "content": "It raises low-speed wheel force and motor RPM."
+      }
+    ],
+    "model_role": "fast",
+    "source_question_id": "Q089"
+  },
+  {
+    "question_id": "H090",
+    "category": "conversation",
+    "question": "And the 0 to 60 time?",
+    "expected_answer": "The current app estimate is about 13.1 seconds; a new gearing value requires recalculation.",
+    "expected_numerical_values": [],
+    "required_facts": [
+      "60",
+      "13"
+    ],
+    "forbidden_claims": [],
+    "expected_source": "application",
+    "relevant_document_or_chunk": "application: vmi/enhancements.py:_report_vehicle_capability; evaluation/reference_case.py",
+    "difficulty": "medium",
+    "reasoning_required": false,
+    "expected_behavior_if_unavailable": null,
+    "scenario": "reference_vehicle",
+    "history": [
+      {
+        "role": "user",
+        "content": "What's my top speed?"
+      },
+      {
+        "role": "assistant",
+        "content": "About 74.6 km/h."
+      }
+    ],
+    "model_role": "fast",
+    "source_question_id": "Q090"
+  }
+]

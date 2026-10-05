@@ -1,0 +1,27 @@
+{
+  "questions": 1,
+  "successful": 1,
+  "rule_score_mean": 1.0,
+  "end_to_end_latency_s": {
+    "n": 1,
+    "mean": 0.0032255000005534384,
+    "median": 0.0032255000005534384,
+    "p90": 0.0032255000005534384,
+    "p95": 0.0032255000005534384
+  },
+  "ttft_s": {
+    "n": 0,
+    "mean": null,
+    "median": null,
+    "p90": null,
+    "p95": null
+  },
+  "llm_latency_s": {
+    "n": 1,
+    "mean": 0,
+    "median": 0,
+    "p90": 0.0,
+    "p95": 0.0
+  },
+  "failures": {}
+}

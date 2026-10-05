@@ -250,6 +250,18 @@ class AssistantMixin:
             results += list(self._report_observations(analysis))
         except Exception:
             pass
+        if analysis == "Acceleration":
+            metrics = getattr(self, "_last_accel_metrics", None)
+            if isinstance(metrics, dict):
+                parts = [f"Last Acceleration plot: {metrics['final_speed_kmh']:.1f} km/h at "
+                         f"{metrics['final_time_s']:.1f} s"]
+                if metrics.get("target_time_s") is not None:
+                    parts.append(f"{metrics['target_kmh']:.0f} km/h at {metrics['target_time_s']:.2f} s")
+                if metrics.get("top_speed_kmh") is not None:
+                    parts.append(f"force-crossing top speed {metrics['top_speed_kmh']:.1f} km/h")
+                if metrics.get("settled_at_s") is not None:
+                    parts.append(f"settled near top speed at {metrics['settled_at_s']:.1f} s")
+                results.append("; ".join(parts) + ". Plot values may predate input edits.")
         for name in ("thermal_results_label", "engine_results_label", "range_results_label",
                      "mech_results_label", "params_label"):
             widget = getattr(self, name, None)
@@ -351,7 +363,7 @@ class AssistantMixin:
             self._set_assistant_status("Choose an installed model first.")
             return
         try:
-            screen = ({} if local_reply or not (plan["route"] == "state" or
+            screen = ({} if local_reply or not self.screen_toggle.get() or not (plan["route"] == "state" or
                         wants_screen_context(question, self._conversation))
                       else self._screen_snapshot())
             analysis_types = tuple(self.plot_type.cget("values"))
@@ -443,8 +455,8 @@ class AssistantMixin:
             elif plan["route"] == "state" and not screen:
                 reply = "I can't see the current analysis while 'Use current analysis' is off. Turn it on and ask again."
                 metrics = {"model": "State guard", "tokens_per_s": None, "truncated": False}
-            elif plan["route"] == "state" and read_state_reply(question, screen):
-                reply = read_state_reply(question, screen)
+            elif plan["route"] == "state" and read_state_reply(question, screen, history):
+                reply = read_state_reply(question, screen, history)
                 metrics = {"model": "State read", "tokens_per_s": None, "truncated": False}
             elif plan["route"] == "state" and checked_state_suggestions(question, screen):
                 reply = checked_state_suggestions(question, screen)

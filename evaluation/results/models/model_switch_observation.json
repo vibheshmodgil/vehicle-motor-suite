@@ -1,0 +1,10 @@
+{
+  "scope": "One observed warm/cold switching sequence on the local GTX 1650 4 GB Ollama service; not a repeated latency distribution.",
+  "sequence": [
+    {"model": "qwen3:4b-instruct", "load_s": 9.237, "first_token_s": 10.545},
+    {"model": "llama3.2:3b", "load_s": 8.004, "first_token_s": 9.178},
+    {"model": "qwen3:4b-instruct", "load_s": 6.925, "first_token_s": 8.200},
+    {"model": "llama3.2:3b", "load_s": 7.649, "first_token_s": 8.785}
+  ],
+  "interpretation": "Alternating checkpoints on this single GPU causes model loading latency that dominates the warm voice response; a distinct resident voice model needs separate capacity."
+}

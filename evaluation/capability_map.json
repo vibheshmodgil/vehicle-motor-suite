@@ -1,0 +1,897 @@
+{
+  "schema_version": 1,
+  "scope": [
+    "Powertrain Sizing",
+    "Acceleration"
+  ],
+  "capabilities": [
+    {
+      "feature": "shared_input",
+      "parameter": "m_ref",
+      "description": "Reference vehicle mass entered by user; lookup may map it to m_i.",
+      "unit": "kg",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "rear_load_ratio",
+      "description": "Used in automatic Crr lookup.",
+      "unit": "ratio",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "wheel_radius",
+      "description": "Dynamic wheel radius for speed/RPM and torque/force conversion.",
+      "unit": "m",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "dynamic_radius_factor",
+      "description": "Scales tyre-spec static radius when tyre picker is used.",
+      "unit": "ratio",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "gear_ratio",
+      "description": "Motor-to-wheel reduction ratio.",
+      "unit": "ratio",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "gear_efficiency",
+      "description": "Torque transfer efficiency in the reduction.",
+      "unit": "ratio",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "wheel_inertia",
+      "description": "Total wheel inertia reflected into acceleration inertial mass.",
+      "unit": "kg m²",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "crr",
+      "description": "Optional rolling-resistance coefficient; auto estimated if blank.",
+      "unit": "ratio",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Dynamics Inputs",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "cd_a",
+      "description": "Optional drag area; auto estimated if blank.",
+      "unit": "m²",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Dynamics Inputs",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "gradients",
+      "description": "Road gradients drawn as resistance curves; percent or degrees selector.",
+      "unit": "%",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Dynamics Inputs",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "peak_torque",
+      "description": "Peak motor torque for theoretical envelope.",
+      "unit": "N m",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Motor Performance Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "peak_power",
+      "description": "Peak motor power for theoretical envelope.",
+      "unit": "kW",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Motor Performance Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "continuous_power",
+      "description": "Power ceiling for continuous torque curve.",
+      "unit": "kW",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Motor Performance Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "peak_to_rated_torque_ratio",
+      "description": "Divides peak torque to make rated torque plateau.",
+      "unit": "ratio",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Motor Performance Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "batt_voltage",
+      "description": "Optional voltage for DC shaft-power cap.",
+      "unit": "V",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Motor Performance Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "batt_current_limit",
+      "description": "Optional battery DC current for shaft-power cap.",
+      "unit": "A",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Motor Performance Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "batt_to_shaft_eff",
+      "description": "Constant cap efficiency fallback without maps.",
+      "unit": "ratio",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Motor Performance Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "ambient_temp",
+      "description": "Used in automatic CdA estimate; does not directly alter drag density here.",
+      "unit": "°C",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Environment Conditions",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_input",
+      "parameter": "ambient_pressure",
+      "description": "Used in automatic CdA estimate; does not directly alter drag density here.",
+      "unit": "bar-like input",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Environment Conditions",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "gradient_unit_combo",
+      "description": "Interpret road gradients as percent grade or incline degrees.",
+      "unit": "selector",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/app.py:Vehicle Dynamics Inputs",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "motor_curve_upload",
+      "description": "Optional RPM-torque curve replaces the theoretical peak envelope.",
+      "unit": "RPM and N m table",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/data_io.py:load_motor_data_excel",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "motor_efficiency_map_upload",
+      "description": "Optional motor efficiency grid used by the battery power cap.",
+      "unit": "speed/torque/efficiency table",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/data_io.py",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "controller_efficiency_map_upload",
+      "description": "Optional controller efficiency grid used by the battery power cap.",
+      "unit": "speed/torque/efficiency table",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/data_io.py",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "battery_eff_smoothing_switch",
+      "description": "Optional smoothing of efficiency maps for the battery limit; off by default.",
+      "unit": "boolean",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/app.py:Motor Performance Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "thermal_overlay_switch",
+      "description": "Show optional thermal duty points on the powertrain plot.",
+      "unit": "boolean",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/app.py:Thermal Load Points",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "thermal_speed_unit_combo",
+      "description": "Interpret thermal point speed as vehicle km/h or motor RPM.",
+      "unit": "selector",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/app.py:Thermal Load Points",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "thermal_points",
+      "description": "Optional gradient, speed and duration duty points for capability overlay.",
+      "unit": "%, km/h or rpm, s",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/app.py:Thermal Load Points",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "output_combo",
+      "description": "Select Torque or Force display in Powertrain Sizing.",
+      "unit": "selector",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/app.py:Analysis Type",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "plot_part_combo",
+      "description": "Select motor or wheel side where applicable; force is at wheel.",
+      "unit": "selector",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/app.py:Simulation Settings",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "speed_unit_combo",
+      "description": "Select vehicle km/h, vehicle RPM or motor RPM x-axis.",
+      "unit": "selector",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/app.py:Simulation Settings",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_control_or_dataset",
+      "parameter": "xlim/ylim",
+      "description": "Optional manual axis bounds; these do not cap acceleration simulation physics.",
+      "unit": "display bounds",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI control or uploaded data",
+      "code_location": "vmi/app.py:Simulation Settings",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_ui_not_applied_here",
+      "parameter": "crr_speed_coeff",
+      "description": "Crr1 is entered in the shared vehicle section but is not applied in these two views.",
+      "unit": "per m/s",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Vehicle Parameters",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "shared_ui_not_applied_here",
+      "parameter": "altitude_m",
+      "description": "Altitude density input is not used by these views' fixed 1.225 kg/m^3 drag expression.",
+      "unit": "m",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Environment Conditions",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "m_i",
+      "description": "Model calculation mass from mass lookup, or entered mass outside table with manual road coefficients.",
+      "unit": "kg",
+      "inputs": [
+        "m_ref"
+      ],
+      "output": true,
+      "calculation_source": "mass table lookup",
+      "code_location": "vmi/physics.py:calculate_crr_cd_a",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "Crr",
+      "description": "Effective rolling coefficient.",
+      "unit": "ratio",
+      "inputs": [
+        "m_ref",
+        "rear_load_ratio",
+        "crr"
+      ],
+      "output": true,
+      "calculation_source": "manual or lookup a/(m_i*rear_load_ratio*g)",
+      "code_location": "vmi/physics.py:calculate_crr_cd_a",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "CdA",
+      "description": "Effective drag area.",
+      "unit": "m²",
+      "inputs": [
+        "m_ref",
+        "ambient_temp",
+        "ambient_pressure",
+        "cd_a"
+      ],
+      "output": true,
+      "calculation_source": "manual or mass-table estimate",
+      "code_location": "vmi/physics.py:calculate_crr_cd_a",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "motor_rpm",
+      "description": "Motor speed corresponding to vehicle speed.",
+      "unit": "rpm",
+      "inputs": [
+        "vehicle_speed",
+        "wheel_radius",
+        "gear_ratio"
+      ],
+      "output": true,
+      "calculation_source": "v/(2πr)*60*G",
+      "code_location": "vmi/torque_force.py:_accel_wheel_force_fn",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "base_speed_rpm",
+      "description": "Theoretical peak torque to constant-power transition.",
+      "unit": "rpm",
+      "inputs": [
+        "peak_power",
+        "peak_torque"
+      ],
+      "output": true,
+      "calculation_source": "(P/T)*60/(2π)",
+      "code_location": "vmi/torque_force.py:plot_torque_graph",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "peak_motor_torque_curve",
+      "description": "Peak motor torque against RPM, from theoretical envelope or uploaded curve, then optional battery cap.",
+      "unit": "N m",
+      "inputs": [
+        "peak_torque",
+        "peak_power",
+        "motor_rpm",
+        "motor_curve",
+        "batt_voltage",
+        "batt_current_limit"
+      ],
+      "output": true,
+      "calculation_source": "T_peak below base RPM else P/ω; uploaded curve interpolated",
+      "code_location": "vmi/torque_force.py:plot_torque_graph",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "continuous_motor_torque_curve",
+      "description": "Continuous torque plateau and power cap (uploaded curve can be scaled by ratio).",
+      "unit": "N m",
+      "inputs": [
+        "peak_torque",
+        "peak_to_rated_torque_ratio",
+        "continuous_power",
+        "motor_rpm",
+        "motor_curve"
+      ],
+      "output": true,
+      "calculation_source": "min(T_peak/ratio, P_cont/ω)",
+      "code_location": "vmi/torque_force.py:plot_force_graph",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "wheel_torque",
+      "description": "Motor shaft torque after gearing.",
+      "unit": "N m",
+      "inputs": [
+        "motor_torque",
+        "gear_ratio",
+        "gear_efficiency"
+      ],
+      "output": true,
+      "calculation_source": "T_m*G*eta_gear",
+      "code_location": "vmi/torque_force.py:plot_torque_graph",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "tractive_force",
+      "description": "Available wheel force.",
+      "unit": "N",
+      "inputs": [
+        "wheel_torque",
+        "wheel_radius"
+      ],
+      "output": true,
+      "calculation_source": "T_w/r",
+      "code_location": "vmi/torque_force.py:plot_force_graph",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "road_load_force",
+      "description": "Rolling, aerodynamic and grade resistance.",
+      "unit": "N",
+      "inputs": [
+        "m_i",
+        "Crr",
+        "CdA",
+        "vehicle_speed",
+        "gradient"
+      ],
+      "output": true,
+      "calculation_source": "m g Crr cos(theta)+0.5*1.225*CdA*v²+m g sin(theta)",
+      "code_location": "vmi/parametric.py:_compute_resistive_force",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "force_intersections",
+      "description": "Peak and continuous capability intersections with each configured gradient road-load curve.",
+      "unit": "speed and N",
+      "inputs": [
+        "tractive_force",
+        "road_load_force",
+        "gradients"
+      ],
+      "output": true,
+      "calculation_source": "linear interpolation of curve crossings",
+      "code_location": "vmi/torque_force.py:plot_force_graph",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "top_speed_report",
+      "description": "Flat-road first available-force/road-load crossing estimated for assistant/report on 0.1–160 km/h sweep.",
+      "unit": "km/h",
+      "inputs": [
+        "tractive_force",
+        "road_load_force"
+      ],
+      "output": true,
+      "calculation_source": "first net-force zero crossing; 160 km/h sweep ceiling",
+      "code_location": "vmi/enhancements.py:_report_vehicle_capability; vmi/parametric.py:_estimate_top_speed",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "max_startable_gradient_report",
+      "description": "Largest 0–60% grade (0.5% steps) with any feasible sampled speed in report/assistant.",
+      "unit": "%",
+      "inputs": [
+        "tractive_force",
+        "road_load_force",
+        "gradient"
+      ],
+      "output": true,
+      "calculation_source": "grade search; max(force-road load)>=0",
+      "code_location": "vmi/enhancements.py:_report_vehicle_capability; vmi/parametric.py:_estimate_max_gradability",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "motor/controller efficiency maps optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "battery_shaft_power_cap",
+      "description": "Optional DC limit bounds motor shaft power after motor/controller efficiency or constant fallback.",
+      "unit": "W",
+      "inputs": [
+        "batt_voltage",
+        "batt_current_limit",
+        "batt_to_shaft_eff",
+        "motor_efficiency_map_upload",
+        "controller_efficiency_map_upload"
+      ],
+      "output": true,
+      "calculation_source": "Pdc=Vdc*Idc; Pshaft<=Pdc*eta",
+      "code_location": "vmi/ui_helpers.py:cap_torque_to_battery; vmi/calc_ext.py:battery_power_cap_w",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "powertrain",
+      "parameter": "thermal_duty_overlay",
+      "description": "Optional duty-point motor torque/RPM and peak-capability utilization for entered speed, grade and duration.",
+      "unit": "N m, rpm, %",
+      "inputs": [
+        "thermal_points",
+        "thermal_speed_unit_combo",
+        "thermal_overlay_switch"
+      ],
+      "output": true,
+      "calculation_source": "steady road load to motor operating point",
+      "code_location": "vmi/ui_helpers.py:compute_thermal_load_points",
+      "dependencies": [],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "acceleration",
+      "parameter": "target_speed",
+      "description": "User-chosen acceleration target.",
+      "unit": "km/h",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Simulation Settings",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "battery cap optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "acceleration",
+      "parameter": "max_time",
+      "description": "Simulation duration.",
+      "unit": "s",
+      "inputs": [],
+      "output": false,
+      "calculation_source": "UI input",
+      "code_location": "vmi/app.py:Simulation Settings",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "battery cap optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "acceleration",
+      "parameter": "net_force_grid",
+      "description": "Available wheel force minus rolling, aerodynamic and grade forces on expanding speed grid.",
+      "unit": "N",
+      "inputs": [
+        "tractive_force",
+        "road_load_force"
+      ],
+      "output": true,
+      "calculation_source": "F_available-F_res",
+      "code_location": "vmi/torque_force.py:_accel_net_force_grid",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "battery cap optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "acceleration",
+      "parameter": "effective_inertial_mass",
+      "description": "Mass plus wheel rotational inertia divided by radius squared.",
+      "unit": "kg",
+      "inputs": [
+        "m_i",
+        "wheel_inertia",
+        "wheel_radius"
+      ],
+      "output": true,
+      "calculation_source": "m+J/r²",
+      "code_location": "vmi/calc_ext.py:effective_mass",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "battery cap optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "acceleration",
+      "parameter": "speed_time_curve",
+      "description": "Vehicle speed integrated from rest for full max_time.",
+      "unit": "km/h vs s",
+      "inputs": [
+        "net_force_grid",
+        "effective_inertial_mass",
+        "max_time"
+      ],
+      "output": true,
+      "calculation_source": "forward Euler at 0.001 s; a=Fnet/m_eff",
+      "code_location": "vmi/calc_ext.py:simulate_acceleration",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "battery cap optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "acceleration",
+      "parameter": "acceleration_plot_top_speed",
+      "description": "First positive-to-nonpositive net-force crossing on expanding speed grid.",
+      "unit": "km/h",
+      "inputs": [
+        "net_force_grid"
+      ],
+      "output": true,
+      "calculation_source": "linear interpolation of first crossing",
+      "code_location": "vmi/calc_ext.py:top_speed_from_net_force",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "battery cap optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "acceleration",
+      "parameter": "acceleration_plot_target_time",
+      "description": "First plotted time at or above configured target speed, if reached.",
+      "unit": "s",
+      "inputs": [
+        "speed_time_curve",
+        "target_speed"
+      ],
+      "output": true,
+      "calculation_source": "first sampled crossing",
+      "code_location": "vmi/torque_force.py:plot_vehicle_max_speed_vs_time",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "battery cap optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "acceleration",
+      "parameter": "acceleration_plot_final_speed",
+      "description": "Speed at configured simulation time.",
+      "unit": "km/h",
+      "inputs": [
+        "speed_time_curve",
+        "max_time"
+      ],
+      "output": true,
+      "calculation_source": "last integrated speed",
+      "code_location": "vmi/calc_ext.py:simulate_acceleration",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "battery cap optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "acceleration",
+      "parameter": "acceleration_plot_settled_at",
+      "description": "First time acceleration drops below 0.01 m/s².",
+      "unit": "s",
+      "inputs": [
+        "speed_time_curve",
+        "net_force_grid"
+      ],
+      "output": true,
+      "calculation_source": "threshold on a=Fnet/m_eff",
+      "code_location": "vmi/calc_ext.py:simulate_acceleration",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "battery cap optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    },
+    {
+      "feature": "acceleration",
+      "parameter": "acceleration_report_target_time",
+      "description": "Flat-road assistant/report estimate using a separate 0.05 s integrator.",
+      "unit": "s",
+      "inputs": [
+        "target_speed",
+        "tractive_force",
+        "road_load_force",
+        "effective_inertial_mass"
+      ],
+      "output": true,
+      "calculation_source": "time stepping at 0.05 s",
+      "code_location": "vmi/parametric.py:_estimate_acceleration_time",
+      "dependencies": [
+        "numpy",
+        "uploaded motor curve optional",
+        "battery cap optional"
+      ],
+      "relevant_documentation_or_reference": "docs/VMI_User_Guide.html"
+    }
+  ],
+  "explicitly_unavailable_in_these_tabs": [
+    "independent controller phase-current limit",
+    "motor manufacturer maximum-RPM cutoff",
+    "traction-limited acceleration",
+    "distance versus time output",
+    "controller thermal derating simulation",
+    "certified speed or test pass/fail status"
+  ]
+}

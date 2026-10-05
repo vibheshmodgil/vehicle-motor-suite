@@ -1,0 +1,361 @@
+[
+  {
+    "path": "evaluation\\results\\baseline\\qwen3_4b_full.jsonl",
+    "overall": {
+      "cases": 90,
+      "scored": 90,
+      "rule_score_mean": 0.5848765432098766,
+      "latency_median_s": 10.412296599999763,
+      "latency_p90_s": 14.836570739999633,
+      "model_calls": 73,
+      "model_only_rule_score_mean": 0.6594368340943684,
+      "model_only_latency_median_s": 11.521714300004533,
+      "model_only_latency_p90_s": 15.80304435999942,
+      "model_only_ttft_median_s": 0.43124299999908544,
+      "voice_eligible_le_55_words": 0.25925925925925924,
+      "failures": {
+        "MODEL_FAILURE": 31,
+        "PROMPT_FAILURE": 6,
+        "CONTEXT_FAILURE": 1,
+        "RETRIEVAL_FAILURE": 9,
+        "HALLUCINATION": 8
+      }
+    },
+    "categories": {
+      "acceleration_direct": {
+        "cases": 8,
+        "scored": 8,
+        "rule_score_mean": 0.6875,
+        "latency_median_s": 12.445255200000247,
+        "latency_p90_s": 13.058401320003032,
+        "model_calls": 8,
+        "model_only_rule_score_mean": 0.6875,
+        "model_only_latency_median_s": 12.445255200000247,
+        "model_only_latency_p90_s": 13.058401320003032,
+        "model_only_ttft_median_s": 0.3925509999971837,
+        "voice_eligible_le_55_words": 0.125,
+        "failures": {
+          "MODEL_FAILURE": 5
+        }
+      },
+      "ambiguous": {
+        "cases": 3,
+        "scored": 3,
+        "rule_score_mean": 0.6666666666666666,
+        "latency_median_s": 7.6514558999999736,
+        "latency_p90_s": 9.11297381999998,
+        "model_calls": 3,
+        "model_only_rule_score_mean": 0.6666666666666666,
+        "model_only_latency_median_s": 7.6514558999999736,
+        "model_only_latency_p90_s": 9.11297381999998,
+        "model_only_ttft_median_s": 0.24111420000008366,
+        "voice_eligible_le_55_words": null,
+        "failures": {
+          "MODEL_FAILURE": 2
+        }
+      },
+      "conversation": {
+        "cases": 5,
+        "scored": 5,
+        "rule_score_mean": 0.6,
+        "latency_median_s": 8.877018000000021,
+        "latency_p90_s": 10.344242720000079,
+        "model_calls": 4,
+        "model_only_rule_score_mean": 0.5,
+        "model_only_latency_median_s": 9.55164775000003,
+        "model_only_latency_p90_s": 10.363903590000087,
+        "model_only_ttft_median_s": 1.5022008999999912,
+        "voice_eligible_le_55_words": 0.6,
+        "failures": {
+          "MODEL_FAILURE": 2
+        }
+      },
+      "cross_analysis": {
+        "cases": 6,
+        "scored": 6,
+        "rule_score_mean": 0.7222222222222222,
+        "latency_median_s": 11.071712650002155,
+        "latency_p90_s": 18.200464499998645,
+        "model_calls": 5,
+        "model_only_rule_score_mean": 0.8666666666666667,
+        "model_only_latency_median_s": 11.521714300004533,
+        "model_only_latency_p90_s": 19.38645781999892,
+        "model_only_ttft_median_s": 0.3844901000120444,
+        "voice_eligible_le_55_words": null,
+        "failures": {
+          "MODEL_FAILURE": 2,
+          "PROMPT_FAILURE": 1
+        }
+      },
+      "engineering_explanation": {
+        "cases": 12,
+        "scored": 12,
+        "rule_score_mean": 0.9166666666666666,
+        "latency_median_s": 11.836250550004479,
+        "latency_p90_s": 13.658270030003042,
+        "model_calls": 11,
+        "model_only_rule_score_mean": 0.9090909090909091,
+        "model_only_latency_median_s": 11.929690500008292,
+        "model_only_latency_p90_s": 13.709235100002843,
+        "model_only_ttft_median_s": 0.31509709999954794,
+        "voice_eligible_le_55_words": null,
+        "failures": {
+          "MODEL_FAILURE": 1
+        }
+      },
+      "motor": {
+        "cases": 7,
+        "scored": 7,
+        "rule_score_mean": 0.6428571428571429,
+        "latency_median_s": 11.157454100000905,
+        "latency_p90_s": 12.581922980005038,
+        "model_calls": 5,
+        "model_only_rule_score_mean": 0.9,
+        "model_only_latency_median_s": 11.538034199998947,
+        "model_only_latency_p90_s": 12.611328720004531,
+        "model_only_ttft_median_s": 0.3232409999909578,
+        "voice_eligible_le_55_words": null,
+        "failures": {
+          "PROMPT_FAILURE": 2,
+          "MODEL_FAILURE": 1
+        }
+      },
+      "motor_controller": {
+        "cases": 6,
+        "scored": 6,
+        "rule_score_mean": 0.3333333333333333,
+        "latency_median_s": 4.97294045000308,
+        "latency_p90_s": 11.243419149999681,
+        "model_calls": 3,
+        "model_only_rule_score_mean": 0.6666666666666666,
+        "model_only_latency_median_s": 10.403794199999538,
+        "model_only_latency_p90_s": 11.747194119999767,
+        "model_only_ttft_median_s": 0.3765385000006063,
+        "voice_eligible_le_55_words": null,
+        "failures": {
+          "PROMPT_FAILURE": 3,
+          "MODEL_FAILURE": 1
+        }
+      },
+      "powertrain_direct": {
+        "cases": 14,
+        "scored": 14,
+        "rule_score_mean": 0.6785714285714286,
+        "latency_median_s": 8.981831200006127,
+        "latency_p90_s": 13.828633459999402,
+        "model_calls": 12,
+        "model_only_rule_score_mean": 0.625,
+        "model_only_latency_median_s": 10.131186150007125,
+        "model_only_latency_p90_s": 14.12232141999557,
+        "model_only_ttft_median_s": 0.44004314999619965,
+        "voice_eligible_le_55_words": 0.21428571428571427,
+        "failures": {
+          "MODEL_FAILURE": 8
+        }
+      },
+      "rag_document": {
+        "cases": 21,
+        "scored": 21,
+        "rule_score_mean": 0.4193121693121693,
+        "latency_median_s": 12.43107359999999,
+        "latency_p90_s": 19.707230200000026,
+        "model_calls": 19,
+        "model_only_rule_score_mean": 0.4634502923976608,
+        "model_only_latency_median_s": 12.841746100000023,
+        "model_only_latency_p90_s": 20.390435840000006,
+        "model_only_ttft_median_s": 8.468418100000008,
+        "voice_eligible_le_55_words": null,
+        "failures": {
+          "MODEL_FAILURE": 9,
+          "CONTEXT_FAILURE": 1,
+          "RETRIEVAL_FAILURE": 9
+        }
+      },
+      "unavailable": {
+        "cases": 8,
+        "scored": 8,
+        "rule_score_mean": 0.25,
+        "latency_median_s": 0.0748809499999652,
+        "latency_p90_s": 9.618329690000017,
+        "model_calls": 3,
+        "model_only_rule_score_mean": 0.5,
+        "model_only_latency_median_s": 7.89271819999999,
+        "model_only_latency_p90_s": 12.494348840000066,
+        "model_only_ttft_median_s": 0.6320172000000639,
+        "voice_eligible_le_55_words": null,
+        "failures": {
+          "HALLUCINATION": 8
+        }
+      }
+    }
+  },
+  {
+    "path": "evaluation\\results\\production\\qwen3_4b_full_v3.jsonl",
+    "overall": {
+      "cases": 90,
+      "scored": 90,
+      "rule_score_mean": 0.9708333333333333,
+      "latency_median_s": 0.0007275499997376755,
+      "latency_p90_s": 5.9827759099995115,
+      "model_calls": 15,
+      "model_only_rule_score_mean": 1.0,
+      "model_only_latency_median_s": 6.531292499999836,
+      "model_only_latency_p90_s": 8.643303600000399,
+      "model_only_ttft_median_s": 0.2158288000000539,
+      "voice_eligible_le_55_words": 1.0,
+      "failures": {
+        "PROMPT_FAILURE": 5,
+        "HALLUCINATION": 1
+      }
+    },
+    "categories": {
+      "acceleration_direct": {
+        "cases": 8,
+        "scored": 8,
+        "rule_score_mean": 1.0,
+        "latency_median_s": 0.0004262999996171857,
+        "latency_p90_s": 0.0009283299998969596,
+        "model_calls": 0,
+        "model_only_rule_score_mean": null,
+        "model_only_latency_median_s": null,
+        "model_only_latency_p90_s": null,
+        "model_only_ttft_median_s": null,
+        "voice_eligible_le_55_words": 1.0,
+        "failures": {}
+      },
+      "ambiguous": {
+        "cases": 3,
+        "scored": 3,
+        "rule_score_mean": 1.0,
+        "latency_median_s": 0.00019809999957942637,
+        "latency_p90_s": 0.00023041999975248473,
+        "model_calls": 0,
+        "model_only_rule_score_mean": null,
+        "model_only_latency_median_s": null,
+        "model_only_latency_p90_s": null,
+        "model_only_ttft_median_s": null,
+        "voice_eligible_le_55_words": null,
+        "failures": {}
+      },
+      "conversation": {
+        "cases": 5,
+        "scored": 5,
+        "rule_score_mean": 0.9,
+        "latency_median_s": 0.0002539999995860853,
+        "latency_p90_s": 1.1470907799999623,
+        "model_calls": 1,
+        "model_only_rule_score_mean": 1.0,
+        "model_only_latency_median_s": 1.91161910000028,
+        "model_only_latency_p90_s": 1.91161910000028,
+        "model_only_ttft_median_s": 0.604809400000704,
+        "voice_eligible_le_55_words": 1.0,
+        "failures": {
+          "PROMPT_FAILURE": 1
+        }
+      },
+      "cross_analysis": {
+        "cases": 6,
+        "scored": 6,
+        "rule_score_mean": 1.0,
+        "latency_median_s": 6.170000006022747e-05,
+        "latency_p90_s": 6.83999996908824e-05,
+        "model_calls": 0,
+        "model_only_rule_score_mean": null,
+        "model_only_latency_median_s": null,
+        "model_only_latency_p90_s": null,
+        "model_only_ttft_median_s": null,
+        "voice_eligible_le_55_words": null,
+        "failures": {}
+      },
+      "engineering_explanation": {
+        "cases": 12,
+        "scored": 12,
+        "rule_score_mean": 1.0,
+        "latency_median_s": 6.084860899999967,
+        "latency_p90_s": 7.544423619999998,
+        "model_calls": 8,
+        "model_only_rule_score_mean": 1.0,
+        "model_only_latency_median_s": 6.711161899999752,
+        "model_only_latency_p90_s": 7.900214080000024,
+        "model_only_ttft_median_s": 0.19838640000034502,
+        "voice_eligible_le_55_words": null,
+        "failures": {}
+      },
+      "motor": {
+        "cases": 7,
+        "scored": 7,
+        "rule_score_mean": 1.0,
+        "latency_median_s": 5.53815990000021,
+        "latency_p90_s": 7.912035820000347,
+        "model_calls": 4,
+        "model_only_rule_score_mean": 1.0,
+        "model_only_latency_median_s": 6.684993349999786,
+        "model_only_latency_p90_s": 8.282819110000492,
+        "model_only_ttft_median_s": 0.21056140000018786,
+        "voice_eligible_le_55_words": null,
+        "failures": {}
+      },
+      "motor_controller": {
+        "cases": 6,
+        "scored": 6,
+        "rule_score_mean": 1.0,
+        "latency_median_s": 0.00012754999988828786,
+        "latency_p90_s": 7.363799250000284,
+        "model_calls": 2,
+        "model_only_rule_score_mean": 1.0,
+        "model_only_latency_median_s": 7.363799250000284,
+        "model_only_latency_p90_s": 8.69318265000029,
+        "model_only_ttft_median_s": 1.2135864000001675,
+        "voice_eligible_le_55_words": null,
+        "failures": {}
+      },
+      "powertrain_direct": {
+        "cases": 14,
+        "scored": 14,
+        "rule_score_mean": 1.0,
+        "latency_median_s": 0.0003062000000682019,
+        "latency_p90_s": 0.0016094100000373151,
+        "model_calls": 0,
+        "model_only_rule_score_mean": null,
+        "model_only_latency_median_s": null,
+        "model_only_latency_p90_s": null,
+        "model_only_ttft_median_s": null,
+        "voice_eligible_le_55_words": 1.0,
+        "failures": {}
+      },
+      "rag_document": {
+        "cases": 21,
+        "scored": 21,
+        "rule_score_mean": 0.9940476190476191,
+        "latency_median_s": 0.1941965000005439,
+        "latency_p90_s": 0.21613600000000588,
+        "model_calls": 0,
+        "model_only_rule_score_mean": null,
+        "model_only_latency_median_s": null,
+        "model_only_latency_p90_s": null,
+        "model_only_ttft_median_s": null,
+        "voice_eligible_le_55_words": null,
+        "failures": {
+          "PROMPT_FAILURE": 1
+        }
+      },
+      "unavailable": {
+        "cases": 8,
+        "scored": 8,
+        "rule_score_mean": 0.75,
+        "latency_median_s": 0.0003479499996501545,
+        "latency_p90_s": 0.1878548600002432,
+        "model_calls": 0,
+        "model_only_rule_score_mean": null,
+        "model_only_latency_median_s": null,
+        "model_only_latency_p90_s": null,
+        "model_only_ttft_median_s": null,
+        "voice_eligible_le_55_words": null,
+        "failures": {
+          "HALLUCINATION": 1,
+          "PROMPT_FAILURE": 3
+        }
+      }
+    }
+  }
+]

@@ -728,6 +728,19 @@ class TorqueForceMixin:
         settled_at = info.get("settled_at_s")
         final_velocity = float(velocity_kmh[-1])
         final_time = float(time_values[-1])
+        try:
+            target_kmh = float(self.target_speed.get())
+        except (TypeError, ValueError):
+            target_kmh = None
+        self._last_accel_metrics = {
+            "target_kmh": target_kmh,
+            "target_time_s": None,
+            "top_speed_kmh": top_speed,
+            "final_speed_kmh": final_velocity,
+            "final_time_s": final_time,
+            "settled_at_s": settled_at,
+            "launched": bool(info.get("launched", True)),
+        }
 
         # One plot call, one legend entry (this curve used to be drawn twice).
         self.ax.plot(time_values, velocity_kmh, color=speed_c, linestyle=speed_ls,
@@ -748,6 +761,7 @@ class TorqueForceMixin:
             index_target = np.where(velocity_kmh >= speed_target)[0]
             if len(index_target) > 0:
                 time_target = float(time_values[index_target[0]])
+                self._last_accel_metrics["target_time_s"] = time_target
                 # Mark the target speed point on the plot
                 self.ax.axvline(x=time_target, color='red', linestyle='--',
                                 label=f"{speed_target} km/h at {time_target:.1f}s")
@@ -813,4 +827,3 @@ class TorqueForceMixin:
             self.apply_graph_style()
 
         self.canvas.draw()  # Refresh plot
-
